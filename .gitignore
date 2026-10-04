@@ -1,0 +1,12 @@
+# Ignore large raw and processed CSV/log files
+data/raw/**/*.csv
+data/raw/**/*.log
+data/processed/**/*.csv
+data/processed/**/*.npy
+
+# Python cache & virtual environments
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.DS_Store

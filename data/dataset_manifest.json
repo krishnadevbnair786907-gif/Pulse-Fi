@@ -1,0 +1,25 @@
+{
+  "project": "Pulse-Fi: Wi-Fi CSI-Based Presence Detection, RF Fingerprinting & Respiratory Monitoring",
+  "hardware": "Dual ESP32 (Active AP + Active STA, 802.11n MCS7, 384-byte CSI frames, 64 subcarriers)",
+  "total_files": 12,
+  "datasets": {
+    "presence": [
+      {"file": "data/raw/presence/empty.csv", "label": "empty", "class_id": 0, "description": "Empty room baseline #1"},
+      {"file": "data/raw/presence/empty_02.csv", "label": "empty", "class_id": 0, "description": "Empty room baseline #2 (-54 dBm matched)"},
+      {"file": "data/raw/presence/moving.csv", "label": "moving", "class_id": 1, "description": "Active human movement #1"},
+      {"file": "data/raw/presence/moving_02.csv", "label": "moving", "class_id": 1, "description": "Active human movement across zones #2"}
+    ],
+    "rf_fingerprinting": [
+      {"file": "data/raw/rf_fingerprinting/zone1_1m.csv", "label": "zone_1m", "class_id": 0, "distance_m": 1.0, "description": "Close-range LoS stationary presence (~1m)"},
+      {"file": "data/raw/rf_fingerprinting/zone2_2m.csv", "label": "zone_2m", "class_id": 1, "distance_m": 2.0, "description": "Mid-range stationary presence (~2m)"},
+      {"file": "data/raw/rf_fingerprinting/zone3_3m.csv", "label": "zone_3m", "class_id": 2, "distance_m": 3.0, "description": "Far-corner stationary presence (~3m+)"}
+    ],
+    "respiratory": [
+      {"file": "data/raw/respiratory/normal_breathing_01.csv", "label": "normal", "class_id": 0, "description": "Normal resting respiration trial 1"},
+      {"file": "data/raw/respiratory/normal_breathing_02.csv", "label": "normal", "class_id": 0, "description": "Normal resting respiration trial 2"},
+      {"file": "data/raw/respiratory/normal_breathing_03.csv", "label": "normal", "class_id": 0, "description": "Normal resting respiration trial 3"},
+      {"file": "data/raw/respiratory/fast_breathing_01.csv", "label": "tachypnea_fast", "class_id": 1, "description": "Rapid shallow breathing anomaly"},
+      {"file": "data/raw/respiratory/apnea_01.csv", "label": "apnea_hold", "class_id": 2, "description": "Breath-hold / apnea intervals anomaly"}
+    ]
+  }
+}
