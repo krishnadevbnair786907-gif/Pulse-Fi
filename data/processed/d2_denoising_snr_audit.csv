@@ -1,0 +1,6 @@
+Capture_File,Class_Label,Pre_Bandpass_InBand_SNR_dB,Post_Bandpass_InBand_SNR_dB,Filter_SNR_Gain_dB,Mean_Filtered_RMS
+normal_breathing_01,normal,-6.27,10.29,16.57,0.3578
+normal_breathing_02,normal,-4.77,9.36,14.13,0.5649
+normal_breathing_03,normal,-7.25,10.79,18.04,0.3451
+fast_breathing_01,tachypnea_fast,-7.29,8.5,15.79,0.3324
+apnea_01,apnea_hold,-5.97,9.82,15.8,0.3318

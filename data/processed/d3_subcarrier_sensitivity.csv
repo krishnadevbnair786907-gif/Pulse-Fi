@@ -1,0 +1,6 @@
+Capture_File,Class_Label,Top_6_Subcarriers_1Indexed,Top6_Mean_RMS,Naive_52SC_Average_RMS,SNR_Preservation_Ratio
+normal_breathing_01,normal,"SC2, SC17, SC4, SC14, SC6, SC3",0.4115,0.3277,1.26
+normal_breathing_02,normal,"SC4, SC5, SC2, SC3, SC11, SC1",0.6727,0.5394,1.25
+normal_breathing_03,normal,"SC5, SC11, SC12, SC4, SC3, SC2",0.3907,0.3175,1.23
+fast_breathing_01,tachypnea_fast,"SC1, SC44, SC21, SC15, SC40, SC26",0.3781,0.28,1.35
+apnea_01,apnea_hold,"SC6, SC44, SC2, SC12, SC9, SC4",0.3828,0.2867,1.34

@@ -1,0 +1,13 @@
+Capture_File,Task_Category,Label,Raw_Packets,Duration_Sec,Mean_Raw_Fs_Hz,Target_Resampled_Fs_Hz,Resampled_Uniform_Samples,Rate_Deviation_Pct
+empty,presence,empty,1507,66.7,22.59,20.0,1334,12.97
+empty_02,presence,empty,1019,89.15,11.43,20.0,1783,42.85
+moving,presence,moving,918,80.1,11.46,20.0,1602,42.7
+moving_02,presence,moving,930,81.35,11.43,20.0,1627,42.84
+zone1_1m,rf_fingerprinting,zone_1m,750,65.05,11.53,20.0,1301,42.35
+zone2_2m,rf_fingerprinting,zone_2m,671,57.9,11.59,20.0,1158,42.06
+zone3_3m,rf_fingerprinting,zone_3m,824,71.55,11.52,20.0,1431,42.42
+normal_breathing_01,respiratory,normal,1443,127.8,11.29,20.0,2556,43.54
+normal_breathing_02,respiratory,normal,1433,127.05,11.28,20.0,2541,43.6
+normal_breathing_03,respiratory,normal,1375,121.9,11.28,20.0,2438,43.6
+fast_breathing_01,respiratory,tachypnea_fast,722,62.45,11.56,20.0,1249,42.19
+apnea_01,respiratory,apnea_hold,900,78.45,11.47,20.0,1569,42.64
