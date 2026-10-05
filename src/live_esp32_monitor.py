@@ -5,7 +5,7 @@ Authors: Krishnadev B Nair (241140100), Ardra Ajikumar (241140107), Benert P San
 Works in two modes:
   1. Live USB Hardware Mode: Reads live ESP32 CSI packets from /dev/cu.usbserial*
   2. Hardware Replay Mode (--simulate or automatic fallback when ESP32 is unplugged):
-     Streams real ESP32 hardware windows through models/presence_best_model.pkl!
+     Streams real ESP32 hardware windows through the trained Random Forest pipeline!
 """
 
 import os
@@ -27,6 +27,32 @@ FS = 20.0
 WIN_PRES = 80         # 4-second window (20 Hz) for Presence & Activity
 STEP_PACKETS = 20     # Print live inference every 1.0 second
 ACTIVE_52_INDICES = list(range(6, 32)) + list(range(33, 59))
+
+
+def load_presence_estimator():
+    """Load trained presence classifier and handle both Pipeline objects and dict bundles."""
+    if os.path.exists("models/d8_random_forest_presence.pkl"):
+        obj = joblib.load("models/d8_random_forest_presence.pkl")
+        if hasattr(obj, "predict"):
+            return obj, None
+
+    obj = joblib.load("models/presence_best_model.pkl")
+    if isinstance(obj, dict):
+        model = obj.get("model") or obj.get("clf") or obj.get("estimator")
+        scaler = obj.get("scaler")
+        return model, scaler
+    return obj, None
+
+
+def predict_presence_window(model, scaler, x_vec):
+    if scaler is not None:
+        x_in = scaler.transform(x_vec)
+    else:
+        x_in = x_vec
+    pred_cls = int(model.predict(x_in)[0])
+    probs = model.predict_proba(x_in)[0]
+    conf = float(np.max(probs) * 100.0)
+    return pred_cls, conf
 
 
 def auto_detect_mac_serial_port():
@@ -68,7 +94,6 @@ def condition_live_buffer(buf_arr):
 
 
 def extract_live_128_features(wc, wf, fs=20.0):
-    """Self-contained 128-feature extractor matching models/presence_best_model.pkl."""
     b_fast, a_fast = butter(4, [0.34 / (0.5 * fs), 0.70 / (0.5 * fs)], btype="band")
     w_fast = filtfilt(b_fast, a_fast, wc - np.mean(wc, axis=0), axis=0)
 
@@ -101,7 +126,6 @@ def extract_live_128_features(wc, wf, fs=20.0):
 
     p_norm_band = float(np.sum(P_v[(f_v >= 0.16) & (f_v <= 0.33)]) / np.sum(P_v))
     p_fast_band = float(np.sum(P_v[(f_v > 0.33) & (f_v <= 0.68)]) / np.sum(P_v))
-    log_p_ratio = float(np.log10((p_fast_band + 1e-6) / (p_norm_band + 1e-6)))
 
     dom_freq = float(f_v[np.argmax(P_v)]) if len(P_v) > 0 else 0.25
     est_bpm = float(dom_freq * 60.0)
@@ -134,26 +158,23 @@ def format_badge(pred_class, est_bpm):
         return "\033[91m🔴 [PERSON DETECTED]  ACTIVE MOVEMENT (Walking / Moving)\033[0m"
 
 
-def run_replay_demo(pres_model):
-    """Stream real hardware windows from data/processed/features/presence_dataset.npz across all 3 room states."""
+def run_replay_demo(model, scaler):
     pres_data = np.load("data/processed/features/presence_dataset.npz", allow_pickle=True)
     X_all = pres_data["X"]
     y_all = pres_data["y"]
 
-    state_Labels = [
+    state_labels = [
         (0, "EMPTY ROOM CAPTURE (empty.csv)"),
         (1, "STATIONARY PERSON CAPTURE (stationary breathing)"),
         (2, "ACTIVE MOVEMENT CAPTURE (moving.csv)")
     ]
 
-    for target_cls, title in state_Labels:
+    for target_cls, title in state_labels:
         idxs = np.where(y_all == target_cls)[0][:4]
         print(f"\n\033[96m>>> [HARDWARE STREAM] Streaming ESP32 CSI Capture: {title}\033[0m")
         for w_i, idx in enumerate(idxs, 1):
             x_vec = X_all[idx].reshape(1, -1)
-            pred_cls = int(pres_model.predict(x_vec)[0])
-            probs = pres_model.predict_proba(x_vec)[0]
-            conf = float(np.max(probs) * 100.0)
+            pred_cls, conf = predict_presence_window(model, scaler, x_vec)
 
             sig_rms = float(abs(X_all[idx, 0]))
             diff_rms = float(abs(X_all[idx, 3]))
@@ -161,7 +182,7 @@ def run_replay_demo(pres_model):
             badge = format_badge(pred_cls, est_bpm)
             ts = time.strftime("%H:%M:%S")
             print(f"[{ts}] Win #{w_i:02d} | CSI RMS: {sig_rms:5.3f} | Vel: {diff_rms:5.3f} | {badge} (Conf: {conf:5.1f}%)")
-            time.sleep(0.12)
+            time.sleep(0.10)
 
 
 def main():
@@ -175,7 +196,7 @@ def main():
     print("  PULSE-FI: LIVE ESP32 WI-FI CSI ROOM PRESENCE & RESPIRATORY MONITOR (ML ENSEMBLE POWERED)")
     print("=" * 98)
 
-    pres_model = joblib.load("models/presence_best_model.pkl")
+    model, scaler = load_presence_estimator()
 
     if not args.simulate:
         port = args.port or auto_detect_mac_serial_port()
@@ -189,7 +210,7 @@ def main():
 
     try:
         if args.simulate:
-            run_replay_demo(pres_model)
+            run_replay_demo(model, scaler)
         else:
             buffer = deque(maxlen=WIN_PRES)
             pkt_counter = 0
@@ -206,8 +227,7 @@ def main():
                         wc, wf = condition_live_buffer(buf_arr)
                         feats = extract_live_128_features(wc, wf, fs=FS)
                         X_in = feats.reshape(1, -1)
-                        pred_cls = int(pres_model.predict(X_in)[0])
-                        conf = float(np.max(pres_model.predict_proba(X_in)[0]) * 100.0)
+                        pred_cls, conf = predict_presence_window(model, scaler, X_in)
                         badge = format_badge(pred_cls, float(feats[12]))
                         ts = time.strftime("%H:%M:%S")
                         print(f"[{ts}] Win #{win_counter:02d} | CSI RMS: {feats[0]:5.3f} | Vel: {feats[3]:5.3f} | {badge} (Conf: {conf:5.1f}%)")
