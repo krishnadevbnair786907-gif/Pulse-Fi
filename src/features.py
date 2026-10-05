@@ -163,8 +163,8 @@ def extract_respiratory_features(win_clean, win_filt=None, return_diagnostics=Fa
     # using AC dynamic velocity dispersion (no static DC spatial stats used!)
     norm_mask = (freqs >= 0.19) & (freqs <= 0.32)
     fast_mask = (freqs >= 0.38) & (freqs <= 0.58)
-    ac_concentration = np.max(sc_std_norm) / (np.mean(sc_std_norm) + 1e-8)
-    if ac_concentration > 2.35 or (sig_rms < 0.42 and fast_to_sig_ratio > 0.68):
+    ac_high_to_low = (ac_sb[2] + ac_sb[3]) / (ac_sb[0] + ac_sb[1] + 1e-8)
+    if ac_high_to_low > 0.96 and sig_rms < 0.58:
         dom_freq = freqs[fast_mask][np.argmax(psd[fast_mask])]
     else:
         dom_freq = freqs[norm_mask][np.argmax(psd[norm_mask])]
