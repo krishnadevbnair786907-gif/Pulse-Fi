@@ -48,11 +48,11 @@ def get_candidate_models():
         ]),
         'SVM (RBF)': Pipeline([
             ('scaler', StandardScaler()),
-            ('clf', SVC(kernel='rbf', C=10.0, gamma='scale', class_weight='balanced', probability=True, random_state=42))
+            ('clf', SVC(kernel='rbf', C=10.0, gamma='scale', class_weight='balanced', random_state=42))
         ]),
         'MLP Neural Net': Pipeline([
             ('scaler', StandardScaler()),
-            ('clf', MLPClassifier(hidden_layer_sizes=(64, 32), max_iter=600, random_state=42))
+            ('clf', MLPClassifier(hidden_layer_sizes=(64, 32), max_iter=1500, random_state=42))
         ])
     }
 
@@ -130,7 +130,7 @@ def evaluate_bpm_accuracy():
     """Evaluate FFT respiratory rate (BPM) estimation accuracy across normal & fast breathing."""
     data = np.load('data/processed/features/respiratory_dataset.npz', allow_pickle=True)
     X, y = data['X'], data['y']
-    est_bpm = X[:, 9]  # Feature index 9 is est_bpm from padded FFT
+    est_bpm = X[:, 14]  # Feature index 9 is est_bpm from padded FFT
 
     norm_bpm = est_bpm[y == 0]
     fast_bpm = est_bpm[y == 1]
