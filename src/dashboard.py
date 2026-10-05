@@ -102,11 +102,11 @@ rf_feats = np.array(extract_rf_fingerprint_features(win_clean, win_filt, win_rss
 rf_pred_idx = models['rf_fingerprinting']['model'].predict(rf_feats)[0]
 rf_label = models['rf_fingerprinting']['classes'][rf_pred_idx]
 
-resp_feats_vec = extract_respiratory_features(win_clean)
+resp_feats_vec = extract_respiratory_features(win_clean, win_filt)
 resp_feats = np.array(resp_feats_vec).reshape(1, -1)
 resp_pred_idx = models['respiratory']['model'].predict(resp_feats)[0]
 resp_label = models['respiratory']['classes'][resp_pred_idx]
-est_bpm = resp_feats_vec[14] if resp_pred_idx != 2 else 0.0
+est_bpm = resp_feats_vec[12] if resp_pred_idx != 2 else 0.0
 
 # Top KPI Cards
 col1, col2, col3, col4 = st.columns(4)

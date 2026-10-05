@@ -87,14 +87,43 @@ def extract_rf_fingerprint_features(win_clean, win_filt, win_rssi):
     return list(norm_profile) + list(mean_profile) + summary_stats
 
 
-def extract_respiratory_features(win_clean):
-    centered = win_clean - np.mean(win_clean, axis=0, keepdims=True)
-    win_resp = butter_bandpass(centered, lowcut=0.14, highcut=0.85, fs=FS, order=4)
-    win_fast = butter_bandpass(centered, lowcut=0.36, highcut=0.85, fs=FS, order=4)
+RESP_FEATURE_NAMES = [
+    # 1. Physiologically grounded scalar features (from pruning table)
+    'sig_rms',               # 0: Excursion depth (wideband RMS)
+    'fast_rms',              # 1: Tachypnea band energy (0.36-0.75 Hz)
+    'fast_to_sig_rms_ratio', # 2: Ratio of rapid-to-wideband RMS
+    'diff_rms',              # 3: Chest wall velocity RMS
+    'iqr',                   # 4: Interquartile amplitude spread
+    'ptp',                   # 5: Peak-to-peak wave swing
+    'min_sub_std',           # 6: Apnea flatline detector (min 3s sub-window std)
+    'max_sub_std',           # 7: Apnea flatline detector (max 3s sub-window std)
+    'dropout_ratio',         # 8: Apnea dropout index (min_sub_std / max_sub_std)
+    'sub_std_cv',            # 9: Sub-window coefficient of variation
+    'zcr',                   # 10: Smoothed zero-crossing rate
+    'dom_freq',              # 11: Fundamental breathing frequency (Hz)
+    'est_bpm',               # 12: Estimated breathing rate (BPM)
+    'p_norm_frac',           # 13: Normal band power fraction (0.18-0.35 Hz)
+    'p_fast_frac',           # 14: Fast band power fraction (0.36-0.75 Hz)
+    'log_p_fast_to_norm',    # 15: Log-transformed fast/normal power ratio
+    'spectral_entropy',      # 16: Normalized Shannon spectral entropy
+    # 2. Zero-mean AC dynamic subcarrier fluctuation & velocity profile (L2-normalized, zero static DC bias)
+    'ac_subband1_energy', 'ac_subband2_energy', 'ac_subband3_energy', 'ac_subband4_energy',
+    'ac_vel_subband1', 'ac_vel_subband2', 'ac_vel_subband3', 'ac_vel_subband4'
+] + [f'ac_norm_std_sc{i+1}' for i in range(52)] + [f'ac_norm_vel_sc{i+1}' for i in range(52)]
 
-    top_sc = select_top_subcarriers(win_resp, k=6)
-    sig = win_resp[:, top_sc]
+
+def extract_respiratory_features(win_clean, win_filt=None, return_diagnostics=False):
+    centered = win_clean - np.mean(win_clean, axis=0, keepdims=True)
+    if win_filt is None:
+        win_filt = butter_bandpass(centered, lowcut=0.14, highcut=0.65, fs=FS, order=4)
+
+    win_fast = butter_bandpass(centered, lowcut=0.36, highcut=0.75, fs=FS, order=4)
+    win_smooth = butter_bandpass(centered, lowcut=0.15, highcut=0.52, fs=FS, order=4)
+
+    top_sc = select_top_subcarriers(win_filt, k=6)
+    sig = win_filt[:, top_sc]
     fast_sig = win_fast[:, top_sc]
+    smooth_sig = win_smooth[:, top_sc]
 
     sub_len = int(3.0 * FS)
     sub_stds = [np.std(sig[i:i + sub_len]) for i in range(0, len(sig) - sub_len + 1, int(1.0 * FS))]
@@ -106,52 +135,59 @@ def extract_respiratory_features(win_clean):
     diff_rms = np.mean(np.sqrt(np.mean(diff1**2, axis=0)))
     sig_rms = np.mean(np.sqrt(np.mean(sig**2, axis=0)))
     fast_rms = np.mean(np.sqrt(np.mean(fast_sig**2, axis=0)))
+    fast_to_sig_ratio = fast_rms / (sig_rms + 1e-8)
 
-    zcr = np.mean(np.sum(np.diff(np.signbit(sig), axis=0), axis=0) / (len(sig) / FS))
+    zcr = np.mean(np.sum(np.diff(np.signbit(smooth_sig), axis=0), axis=0) / (len(smooth_sig) / FS))
 
-    # Fundamental breathing rate via FFT + high-frequency tachypnea harmonic check
+    # Zero-mean AC dynamic fluctuation & velocity across all 52 subcarriers (L2-normalized -> zero RSSI/DC bias)
+    sc_std = np.std(win_filt, axis=0)
+    sc_std_norm = sc_std / (np.linalg.norm(sc_std) + 1e-8)
+    sc_vel = np.std(np.diff(win_filt, axis=0), axis=0)
+    sc_vel_norm = sc_vel / (np.linalg.norm(sc_vel) + 1e-8)
+
+    ac_sb = [np.mean(sc_std_norm[i*13:(i+1)*13]) for i in range(4)]
+    vel_sb = [np.mean(sc_vel_norm[i*13:(i+1)*13]) for i in range(4)]
+
+    # Multi-subcarrier FFT spectrum
     n_fft = 2048
     windowed = sig * np.hanning(len(sig))[:, None]
     fft_mag = np.abs(np.fft.rfft(windowed, n=n_fft, axis=0))
     psd = np.mean(fft_mag ** 2, axis=1)
     freqs = np.fft.rfftfreq(n_fft, d=1.0 / FS)
 
-    p_slow = np.sum(psd[(freqs >= 0.12) & (freqs < 0.20)])
-    p_norm = np.sum(psd[(freqs >= 0.20) & (freqs <= 0.36)])
-    p_fast = np.sum(psd[(freqs > 0.36) & (freqs <= 0.80)])
-    p_tot = p_slow + p_norm + p_fast + 1e-8
+    p_norm = np.sum(psd[(freqs >= 0.18) & (freqs <= 0.35)])
+    p_fast = np.sum(psd[(freqs > 0.35) & (freqs <= 0.75)])
+    p_tot = p_norm + p_fast + 1e-8
 
-    # Fundamental resting respiratory band (0.18 - 0.36 Hz = 10.8 - 21.6 BPM)
-    norm_mask = (freqs >= 0.18) & (freqs <= 0.36)
-    fast_mask = (freqs > 0.36) & (freqs <= 0.65)
-
-    # If rapid breathing band dominates (>52% of total respiratory power & high ZCR), pick tachypnea peak
-    w_psd = psd * (freqs ** 2)
-    norm_mask = (freqs >= 0.20) & (freqs <= 0.32)
+    # Select fundamental resting peak (12-20 BPM) vs rapid tachypnea peak (23-35 BPM)
+    # using AC dynamic velocity dispersion (no static DC spatial stats used!)
+    norm_mask = (freqs >= 0.19) & (freqs <= 0.32)
     fast_mask = (freqs >= 0.38) & (freqs <= 0.58)
-    # In shallow rapid breathing, overall chest displacement sig_rms is smaller and fast-band ratio is higher
-    if sig_rms < 1.35 and (fast_rms / (sig_rms + 1e-8)) > 0.58:
-        dom_freq = freqs[fast_mask][np.argmax(w_psd[fast_mask])]
+    ac_concentration = np.max(sc_std_norm) / (np.mean(sc_std_norm) + 1e-8)
+    if ac_concentration > 2.35 or (sig_rms < 0.42 and fast_to_sig_ratio > 0.68):
+        dom_freq = freqs[fast_mask][np.argmax(psd[fast_mask])]
     else:
         dom_freq = freqs[norm_mask][np.argmax(psd[norm_mask])]
 
     est_bpm = dom_freq * 60.0
-    resp_psd = psd[(freqs >= 0.15) & (freqs <= 0.75)]
+    log_p_fast_to_norm = np.log1p(p_fast / (p_norm + 1e-8))
+    resp_psd = psd[(freqs >= 0.16) & (freqs <= 0.75)]
 
-    all_sc_mean = np.mean(win_clean, axis=0)
-    sc_spatial_ratio = np.mean(all_sc_mean[:26]) / (np.mean(all_sc_mean[26:]) + 1e-8)
-    sc_spatial_std = np.std(all_sc_mean)
-
-    return [
-        sig_rms, fast_rms, fast_rms / (sig_rms + 1e-8),
-        diff_rms, diff_rms / (sig_rms + 1e-8),
-        np.mean(iqr(sig, axis=0)), np.mean(np.ptp(sig, axis=0)), np.mean(kurtosis(sig, axis=0)),
+    feats = [
+        sig_rms, fast_rms, fast_to_sig_ratio, diff_rms,
+        np.mean(iqr(sig, axis=0)), np.mean(np.ptp(sig, axis=0)),
         min_sub_std, max_sub_std, dropout_ratio, sub_std_cv,
         zcr, dom_freq, est_bpm,
-        p_slow / p_tot, p_norm / p_tot, p_fast / p_tot,
-        p_fast / (p_norm + 1e-8), spectral_entropy(resp_psd),
-        sc_spatial_ratio, sc_spatial_std
-    ]
+        p_norm / p_tot, p_fast / p_tot, log_p_fast_to_norm,
+        spectral_entropy(resp_psd)
+    ] + ac_sb + vel_sb + list(sc_std_norm) + list(sc_vel_norm)
+
+    if return_diagnostics:
+        all_sc_mean = np.mean(win_clean, axis=0)
+        sc_spatial_ratio = np.mean(all_sc_mean[:26]) / (np.mean(all_sc_mean[26:]) + 1e-8)
+        sc_spatial_std = np.std(all_sc_mean)
+        return feats, [sc_spatial_ratio, sc_spatial_std]
+    return feats
 
 
 def build_datasets():
@@ -219,11 +255,12 @@ def build_datasets():
         base_id = os.path.splitext(os.path.basename(item['file']))[0]
         data = np.load(f"data/processed/respiratory/{base_id}.npz")
         amp_c = data['amp_clean']
+        amp_f = data['amp_filt']
         cls_id = int(item['class_id'])
 
         step_resp = int(2.0 * FS) if cls_id == 0 else int(0.6 * FS)
         for start in range(0, len(amp_c) - win_resp + 1, step_resp):
-            X_resp.append(extract_respiratory_features(amp_c[start:start + win_resp]))
+            X_resp.append(extract_respiratory_features(amp_c[start:start + win_resp], amp_f[start:start + win_resp]))
             y_resp.append(cls_id)
             meta_resp.append((base_id, item['label']))
 
