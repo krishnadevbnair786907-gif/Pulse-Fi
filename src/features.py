@@ -126,9 +126,9 @@ def extract_respiratory_features(win_clean):
     fast_mask = (freqs > 0.36) & (freqs <= 0.65)
 
     # If rapid breathing band dominates (>52% of total respiratory power & high ZCR), pick tachypnea peak
-    norm_mask = (freqs >= 0.20) & (freqs <= 0.32)
+    norm_mask = (freqs >= 0.18) & (freqs <= 0.33)
     fast_mask = (freqs >= 0.38) & (freqs <= 0.60)
-    if (p_fast / (p_norm + 1e-8)) > 1.05:
+    if np.max(psd[fast_mask]) > 1.35 * np.max(psd[norm_mask]) and zcr > 0.62:
         dom_freq = freqs[fast_mask][np.argmax(psd[fast_mask])]
     else:
         dom_freq = freqs[norm_mask][np.argmax(psd[norm_mask])]
