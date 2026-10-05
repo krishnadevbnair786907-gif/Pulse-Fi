@@ -1,0 +1,5 @@
+Check_Day,Window_Size,Hidden_Units,Dropout_Regularization,CV_Accuracy_Pct,CV_Macro_F1_Pct
+Day 6-8 (Ardra),2.0s (Sub-window),"(32,)",0.1,82.05,81.53
+Day 6-8 (Ardra),3.0s (Baseline D6),"(64, 32)",0.01,99.68,99.7
+Day 6-8 (Ardra),4.0s (Tuned D7 - Config A),"(128, 64)",0.005,100.0,100.0
+Day 6-8 (Ardra),4.0s (Tuned D7 - Optimal),"(128, 64, 32)",0.001,100.0,100.0

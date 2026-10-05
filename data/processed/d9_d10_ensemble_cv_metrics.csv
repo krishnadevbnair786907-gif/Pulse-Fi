@@ -1,0 +1,4 @@
+Sensing_Task,Samples,Sequence_Branch_F1_Pct,Random_Forest_Branch_F1_Pct,Combined_Ensemble_Accuracy_Pct,Combined_Ensemble_Macro_F1_Pct
+Presence Detection (Empty/Stationary/Moving),312,99.7,100.0,100.0,100.0
+Spatial RF Fingerprinting (Zone 1m/2m/3m),249,100.0,100.0,100.0,100.0
+Respiratory Anomaly (Normal/Fast/Apnea),367,99.75,99.75,99.73,99.75
