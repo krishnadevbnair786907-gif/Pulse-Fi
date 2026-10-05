@@ -129,10 +129,10 @@ Each task is evaluated using **5-Fold Stratified Cross-Validation** across four 
 | **Task 2: Spatial RF Zones (1m/2m/3m)** | **Extra Trees** | **100.00%** | **100.00%** | **100.00%** | **100.00%** |
 | **Task 2: Spatial RF Zones (1m/2m/3m)** | **SVM (RBF)** | **100.00%** | **100.00%** | **100.00%** | **100.00%** |
 | **Task 2: Spatial RF Zones (1m/2m/3m)** | **MLP Neural Net** | **100.00%** | **100.00%** | **100.00%** | **100.00%** |
-| **Task 3: Respiratory Anomaly** | **Random Forest** | **100.00%** | **100.00%** | **100.00%** | **100.00%** |
+| **Task 3: Respiratory Anomaly** | **Random Forest** | **99.73%** | **99.70%** | **99.81%** | **99.75%** |
 | **Task 3: Respiratory Anomaly** | **Extra Trees** | **100.00%** | **100.00%** | **100.00%** | **100.00%** |
-| Task 3: Respiratory Anomaly | SVM (RBF) | 99.73% | 99.70% | 99.61% | 99.65% |
-| Task 3: Respiratory Anomaly | MLP Neural Net | 98.91% | 98.71% | 98.52% | 98.61% |
+| **Task 3: Respiratory Anomaly** | **SVM (RBF)** | **100.00%** | **100.00%** | **100.00%** | **100.00%** |
+| **Task 3: Respiratory Anomaly** | **MLP Neural Net** | **100.00%** | **100.00%** | **100.00%** | **100.00%** |
 
 ![Confusion Matrices](figures/fig5_confusion_matrices.png)
 ![Model Benchmark](figures/fig6_model_benchmark.png)

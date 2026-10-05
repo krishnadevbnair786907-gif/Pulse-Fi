@@ -130,7 +130,7 @@ def evaluate_bpm_accuracy():
     """Evaluate FFT respiratory rate (BPM) estimation accuracy across normal & fast breathing."""
     data = np.load('data/processed/features/respiratory_dataset.npz', allow_pickle=True)
     X, y = data['X'], data['y']
-    est_bpm = X[:, 14]  # Feature index 9 is est_bpm from padded FFT
+    est_bpm = X[:, 12]  # Feature index 9 is est_bpm from padded FFT
 
     norm_bpm = est_bpm[y == 0]
     fast_bpm = est_bpm[y == 1]
