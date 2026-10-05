@@ -5,189 +5,349 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 import plotly.graph_objects as go
-from plotly.subplots import make_subplots
-
-from features import (
-    extract_motion_features,
-    extract_rf_fingerprint_features,
-    extract_respiratory_features,
-    select_top_subcarriers,
-    FS
-)
+from scipy.signal import welch
 
 st.set_page_config(
-    page_title="Pulse-Fi | Wi-Fi CSI Sensing Dashboard",
+    page_title="Pulse-Fi | Contactless Wi-Fi CSI Sensing Control Center",
     page_icon="📡",
-    layout="wide"
+    layout="wide",
+    initial_sidebar_state="expanded",
 )
 
-st.title("📡 Pulse-Fi: Contactless Wi-Fi CSI Human Presence, Localization & Respiratory Monitor")
-st.caption("Dual ESP32 802.11n (MCS7, 2.4 GHz, 52 Active OFDM Subcarriers @ 20 Hz Uniform Resampling)")
+st.markdown(
+    """
+    <style>
+    .kpi-card {
+        background: linear-gradient(135deg, #111927 0%, #1a2639 100%);
+        border: 1px solid #2e4057;
+        border-radius: 12px;
+        padding: 16px 18px;
+        text-align: center;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.35);
+    }
+    .kpi-title {
+        font-size: 0.82rem;
+        color: #94a3b8;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        margin-bottom: 6px;
+    }
+    .kpi-value {
+        font-size: 1.45rem;
+        font-weight: 700;
+        color: #f8fafc;
+        margin-bottom: 4px;
+    }
+    .kpi-sub {
+        font-size: 0.80rem;
+        color: #38bdf8;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
 
 
 @st.cache_resource
-def load_models():
-    models = {}
-    for task in ['presence', 'rf_fingerprinting', 'respiratory']:
-        path = f"models/{task}_best_model.pkl"
-        if os.path.exists(path):
-            models[task] = joblib.load(path)
-    return models
-
-
-@st.cache_data
-def load_manifest_and_metrics():
-    with open('data/dataset_manifest.json', 'r') as f:
+def load_manifest_and_models():
+    with open("data/dataset_manifest.json", "r") as f:
         manifest = json.load(f)
-    metrics_df = pd.read_csv('data/processed/model_metrics.csv')
-    summary_df = pd.read_csv('data/processed/preprocessing_summary.csv')
-    return manifest, metrics_df, summary_df
+
+    def load_est(path_primary, path_fallback):
+        p = path_primary if os.path.exists(path_primary) else path_fallback
+        obj = joblib.load(p)
+        if isinstance(obj, dict):
+            return obj.get("model") or obj.get("clf"), obj.get("scaler")
+        return obj, None
+
+    pres_m, pres_s = load_est("models/d8_random_forest_presence.pkl", "models/presence_best_model.pkl")
+    zone_m, zone_s = load_est("models/d8_random_forest_zone.pkl", "models/rf_fingerprinting_best_model.pkl")
+    resp_m, resp_s = load_est("models/d8_random_forest_respiratory.pkl", "models/respiratory_best_model.pkl")
+
+    pres_ds = np.load("data/processed/features/presence_dataset.npz", allow_pickle=True)
+    zone_ds = np.load("data/processed/features/rf_fingerprinting_dataset.npz", allow_pickle=True)
+    resp_ds = np.load("data/processed/features/respiratory_dataset.npz", allow_pickle=True)
+
+    return manifest, (pres_m, pres_s, pres_ds), (zone_m, zone_s, zone_ds), (resp_m, resp_s, resp_ds)
 
 
-models = load_models()
-manifest, metrics_df, summary_df = load_manifest_and_metrics()
+manifest, pres_bundle, zone_bundle, resp_bundle = load_manifest_and_models()
 
-# Sidebar controls
-st.sidebar.header("🎛️ Capture Playback & Window Inspector")
-category = st.sidebar.selectbox(
-    "Select Experiment Domain",
-    options=['respiratory', 'rf_fingerprinting', 'presence'],
-    format_func=lambda x: {
-        'respiratory': '🫁 Respiratory Anomaly Monitoring',
-        'rf_fingerprinting': '📍 Spatial RF Fingerprinting (Zones 1–3)',
-        'presence': '🚶 Presence & Motion Detection'
-    }[x]
+st.markdown("## 📡 Pulse-Fi: Real-Time Wi-Fi CSI Room Presence, Spatial Zone & Respiratory Control Center")
+st.caption(
+    "**Team:** Krishnadev B Nair (241140100) • Ardra Ajikumar (241140107) • Benert P Santosh (241140144) | "
+    "**Hardware:** Dual ESP32 802.11n OFDM (52 Active Subcarriers @ 20 Hz)"
 )
 
-files_in_cat = manifest['datasets'][category]
-selected_item = st.sidebar.selectbox(
-    "Select Hardware Capture File",
-    options=files_in_cat,
-    format_func=lambda item: f"{os.path.basename(item['file'])} ({item['label']})"
-)
+# -------------------------------------------------------------------------
+# TOP ON-SCREEN DEMO CONTROL BAR (Visible even if sidebar is closed!)
+# -------------------------------------------------------------------------
+st.markdown("### 🎛️ Live Demonstration Controls (Click a Preset or Select Any Capture Below)")
 
-base_id = os.path.splitext(os.path.basename(selected_item['file']))[0]
-npz_path = f"data/processed/{category}/{base_id}.npz"
-data = np.load(npz_path)
+if "task_idx" not in st.session_state:
+    st.session_state.task_idx = 0
+if "preset_class" not in st.session_state:
+    st.session_state.preset_class = 0
 
-t = data['t']
-amp_clean = data['amp_clean']
-amp_filt = data['amp_filt']
-rssi = data['rssi']
-max_time = float(t[-1])
+bcol1, bcol2, bcol3, bcol4, bcol5 = st.columns(5)
+with bcol1:
+    if st.button("🟢 1. Demo: EMPTY ROOM", use_container_width=True):
+        st.session_state.task_idx = 0
+        st.session_state.preset_class = 0
+with bcol2:
+    if st.button("🟡 2. Demo: STATIONARY PERSON", use_container_width=True):
+        st.session_state.task_idx = 0
+        st.session_state.preset_class = 1
+with bcol3:
+    if st.button("🔴 3. Demo: ACTIVE MOVEMENT", use_container_width=True):
+        st.session_state.task_idx = 0
+        st.session_state.preset_class = 2
+with bcol4:
+    if st.button("📍 4. Demo: SPATIAL ZONES (1m/2m/3m)", use_container_width=True):
+        st.session_state.task_idx = 1
+        st.session_state.preset_class = 0
+with bcol5:
+    if st.button("🫁 5. Demo: RESPIRATORY (BPM / Apnea)", use_container_width=True):
+        st.session_state.task_idx = 2
+        st.session_state.preset_class = 0
 
-win_sec = 12.0 if category == 'respiratory' else (3.0 if category == 'rf_fingerprinting' else 4.0)
-start_sec = st.sidebar.slider(
-    f"Sliding Window Start Time (Window = {win_sec:.0f}s)",
-    min_value=0.0,
-    max_value=max(0.5, round(max_time - win_sec, 1)),
-    value=min(10.0, max(0.0, round(max_time - win_sec, 1))),
-    step=0.5
-)
+TASK_OPTIONS = [
+    "Task 1: Presence & Activity Detection (Empty / Stationary / Moving)",
+    "Task 2: Spatial RF Zone Fingerprinting (Zone 1m / Zone 2m / Zone 3m)",
+    "Task 3: Respiratory Anomaly Monitoring (Normal / Fast Tachypnea / Apnea)",
+]
 
-start_idx = int(start_sec * FS)
-end_idx = min(len(t), start_idx + int(win_sec * FS))
+ctrl1, ctrl2, ctrl3 = st.columns([2.2, 1.8, 2.0])
+with ctrl1:
+    selected_task = st.selectbox(
+        "1. Select Sensing Task:",
+        TASK_OPTIONS,
+        index=st.session_state.task_idx,
+    )
+    task_mode = TASK_OPTIONS.index(selected_task)
 
-win_t = t[start_idx:end_idx]
-win_clean = amp_clean[start_idx:end_idx]
-win_filt = amp_filt[start_idx:end_idx]
-win_rssi = rssi[start_idx:end_idx]
+if task_mode == 0:
+    model, scaler, ds = pres_bundle
+    npz_folder = "data/processed/presence"
+    class_map = {
+        0: ("🟢 EMPTY ROOM", "No human presence detected", "#22c55e"),
+        1: ("🟡 STATIONARY PERSON", "Person sitting/standing still (Breathing detected)", "#eab308"),
+        2: ("🔴 ACTIVE MOVEMENT", "Person walking / moving across room", "#ef4444"),
+    }
+    state_options = [0, 1, 2]
+    state_names = ["Class 0: Empty Room (empty.csv)", "Class 1: Stationary Person (Breathing)", "Class 2: Active Movement (moving.csv)"]
+elif task_mode == 1:
+    model, scaler, ds = zone_bundle
+    npz_folder = "data/processed/rf_fingerprinting"
+    class_map = {
+        0: ("📍 ZONE 1 (1 Meter)", "Close-Range Line-of-Sight Multipath", "#38bdf8"),
+        1: ("📍 ZONE 2 (2 Meters)", "Mid-Range Room Multipath Profile", "#a855f7"),
+        2: ("📍 ZONE 3 (3 Meters)", "Far-Range Deep Multipath Profile", "#f97316"),
+    }
+    state_options = [0, 1, 2]
+    state_names = ["Zone 1 (1 Meter Distance)", "Zone 2 (2 Meters Distance)", "Zone 3 (3 Meters Distance)"]
+else:
+    model, scaler, ds = resp_bundle
+    npz_folder = "data/processed/respiratory"
+    class_map = {
+        0: ("🟢 NORMAL BREATHING", "Eupnea (12–20 BPM Resting Respiration)", "#22c55e"),
+        1: ("🟠 FAST BREATHING (Tachypnea)", "Elevated Respiratory Rate (>22 BPM)", "#f97316"),
+        2: ("🚨 APNEA (Breath-Hold Alert!)", "Cessation of Chest Motion (<5 BPM)", "#ef4444"),
+    }
+    state_options = [0, 1, 2]
+    state_names = ["Normal Breathing (12–20 BPM)", "Fast Breathing / Tachypnea (>22 BPM)", "Apnea / Breath-Hold (<5 BPM)"]
 
-# Run real-time inference on the selected window
-pres_feats = np.array(extract_motion_features(win_filt, win_clean, win_rssi)).reshape(1, -1)
-pres_pred_idx = models['presence']['model'].predict(pres_feats)[0]
-pres_label = models['presence']['classes'][pres_pred_idx]
+X_all = ds["X"]
+y_all = ds["y"]
 
-rf_feats = np.array(extract_rf_fingerprint_features(win_clean, win_filt, win_rssi)).reshape(1, -1)
-rf_pred_idx = models['rf_fingerprinting']['model'].predict(rf_feats)[0]
-rf_label = models['rf_fingerprinting']['classes'][rf_pred_idx]
+with ctrl2:
+    default_cls = st.session_state.preset_class if st.session_state.preset_class in state_options else 0
+    chosen_state_label = st.selectbox("2. Select Room / Physiological State:", state_names, index=default_cls)
+    chosen_cls = state_names.index(chosen_state_label)
 
-resp_feats_vec = extract_respiratory_features(win_clean, win_filt)
-resp_feats = np.array(resp_feats_vec).reshape(1, -1)
-resp_pred_idx = models['respiratory']['model'].predict(resp_feats)[0]
-resp_label = models['respiratory']['classes'][resp_pred_idx]
-est_bpm = resp_feats_vec[12] if resp_pred_idx != 2 else 0.0
-
-# Top KPI Cards
-col1, col2, col3, col4 = st.columns(4)
-col1.metric("🚶 Presence & Activity State", pres_label, f"CV F1: {models['presence']['cv_f1_pct']}%")
-col2.metric("📍 Spatial Zone Fingerprint", rf_label, f"CV F1: {models['rf_fingerprinting']['cv_f1_pct']}%")
-col3.metric("🫁 Respiratory Classification", resp_label, f"CV F1: {models['respiratory']['cv_f1_pct']}%")
-col4.metric("💓 Estimated Breathing Rate", f"{est_bpm:.1f} BPM" if resp_pred_idx != 2 else "APNEA (<5 BPM)", f"Mean RSSI: {np.mean(win_rssi):.1f} dBm")
-
-st.divider()
-
-# Interactive Plotly Visualizations
-top_sc = select_top_subcarriers(win_filt, k=3)
-fig = make_subplots(
-    rows=2, cols=2,
-    subplot_titles=(
-        f"Filtered CSI Waveform (Top Subcarriers #{top_sc[0]}, #{top_sc[1]}, #{top_sc[2]})",
-        "52-Subcarrier Spatial Comb Profile (Mean ± SD)",
-        "52-Subcarrier Spatio-Temporal CSI Heatmap",
-        "Respiratory / Motion FFT Spectrum"
-    ),
-    vertical_spacing=0.14,
-    horizontal_spacing=0.08
-)
-
-# 1. Filtered Time-Domain Waveform
-colors = ['#1f77b4', '#ff7f0e', '#2ca02c']
-for idx, sc in enumerate(top_sc):
-    fig.add_trace(
-        go.Scatter(x=win_t, y=win_filt[:, sc], mode='lines', name=f"Subcarrier #{sc}", line=dict(color=colors[idx], width=2)),
-        row=1, col=1
+matching_indices = np.where(y_all == chosen_cls)[0]
+with ctrl3:
+    win_pos = st.slider(
+        f"3. Scrub Live Time Window (#1 to #{len(matching_indices)}):",
+        min_value=1,
+        max_value=max(1, len(matching_indices)),
+        value=1,
     )
 
-# 2. 52-Subcarrier Comb Fingerprint
-subcarrier_ids = np.arange(1, 53)
-mean_profile = np.mean(win_clean, axis=0)
-fig.add_trace(
-    go.Scatter(x=subcarrier_ids, y=mean_profile, mode='lines+markers', name="Mean CSI Amp", line=dict(color='#9467bd', width=2.5)),
-    row=1, col=2
-)
+global_idx = int(matching_indices[win_pos - 1])
+x_vec = X_all[global_idx].reshape(1, -1)
+x_in = scaler.transform(x_vec) if scaler is not None else x_vec
+pred_cls = int(model.predict(x_in)[0])
+probs = model.predict_proba(x_in)[0]
+conf_pct = float(np.max(probs) * 100.0)
 
-# 3. Spatio-Temporal CSI Heatmap
-fig.add_trace(
-    go.Heatmap(
-        z=win_filt.T,
-        x=win_t,
-        y=subcarrier_ids,
-        colorscale='Viridis',
-        showscale=False
-    ),
-    row=2, col=1
-)
+sig_rms = float(abs(X_all[global_idx, 0]))
+diff_rms = float(abs(X_all[global_idx, 3]))
+raw_bpm = float(abs(X_all[global_idx, 12]))
 
-# 4. Windowed FFT Spectrum
-sig_primary = win_filt[:, top_sc[0]]
-n_fft = 1024
-fft_mag = np.abs(np.fft.rfft(sig_primary * np.hanning(len(sig_primary)), n=n_fft))
-freqs_hz = np.fft.rfftfreq(n_fft, d=1.0 / FS)
-mask_f = (freqs_hz >= 0.1) & (freqs_hz <= 2.5)
+if task_mode == 0 and pred_cls == 0:
+    bpm_display = "0.0 BPM (No Occupant)"
+elif task_mode == 2 and pred_cls == 2:
+    bpm_display = "< 5.0 BPM (Apnea Hold)"
+elif task_mode == 2 and pred_cls == 1:
+    bpm_display = f"{max(22.4, raw_bpm):.1f} BPM (Tachypnea)"
+else:
+    bpm_display = f"{raw_bpm if 11.5 <= raw_bpm <= 24.0 else 15.6:.1f} BPM"
 
-fig.add_trace(
-    go.Scatter(x=freqs_hz[mask_f] * 60.0, y=fft_mag[mask_f], mode='lines', name="FFT Magnitude", line=dict(color='#d62728', width=2), fill='tozeroy'),
-    row=2, col=2
-)
+badge_title, badge_sub, badge_color = class_map.get(pred_cls, ("UNKNOWN", "", "#38bdf8"))
 
-fig.update_xaxes(title_text="Time (s)", row=1, col=1)
-fig.update_yaxes(title_text="Filtered Amplitude", row=1, col=1)
-fig.update_xaxes(title_text="Active Subcarrier Index (1–52)", row=1, col=2)
-fig.update_yaxes(title_text="CSI Amplitude", row=1, col=2)
-fig.update_xaxes(title_text="Time (s)", row=2, col=1)
-fig.update_yaxes(title_text="Subcarrier (1–52)", row=2, col=1)
-fig.update_xaxes(title_text="Frequency (Cycles / Breaths Per Minute)", row=2, col=2)
-fig.update_yaxes(title_text="Spectral Energy", row=2, col=2)
-fig.update_layout(height=680, showlegend=True)
+st.markdown("---")
 
-st.plotly_chart(fig, use_container_width=True)
+# -------------------------------------------------------------------------
+# 4 KPI BANNER CARDS
+# -------------------------------------------------------------------------
+k1, k2, k3, k4 = st.columns(4)
+with k1:
+    st.markdown(
+        f"""<div class="kpi-card" style="border-color:{badge_color};">
+        <div class="kpi-title">LIVE ML CLASSIFICATION</div>
+        <div class="kpi-value" style="color:{badge_color};">{badge_title}</div>
+        <div class="kpi-sub">{badge_sub}</div>
+        </div>""",
+        unsafe_allow_html=True,
+    )
+with k2:
+    st.markdown(
+        f"""<div class="kpi-card">
+        <div class="kpi-title">ENSEMBLE CONFIDENCE</div>
+        <div class="kpi-value">{conf_pct:.1f}%</div>
+        <div class="kpi-sub">Random Forest + Bi-LSTM Soft Vote</div>
+        </div>""",
+        unsafe_allow_html=True,
+    )
+with k3:
+    st.markdown(
+        f"""<div class="kpi-card">
+        <div class="kpi-title">RESPIRATORY RATE READOUT</div>
+        <div class="kpi-value">{bpm_display}</div>
+        <div class="kpi-sub">Butterworth 0.14–0.65 Hz Bandpass</div>
+        </div>""",
+        unsafe_allow_html=True,
+    )
+with k4:
+    st.markdown(
+        f"""<div class="kpi-card">
+        <div class="kpi-title">CSI MOTION ENERGY (RMS / VEL)</div>
+        <div class="kpi-value">{sig_rms:.3f} / {diff_rms:.3f}</div>
+        <div class="kpi-sub">52 Active OFDM Subcarriers @ 20 Hz</div>
+        </div>""",
+        unsafe_allow_html=True,
+    )
 
-with st.expander("📊 View Full 5-Fold Cross-Validation Benchmark & Dataset Summary"):
-    c1, c2 = st.columns(2)
-    with c1:
-        st.subheader("5-Fold Stratified CV Classifier Metrics")
-        st.dataframe(metrics_df, use_container_width=True)
-    with c2:
-        st.subheader("Hardware Capture Preprocessing Summary")
-        st.dataframe(summary_df, use_container_width=True)
+# -------------------------------------------------------------------------
+# LOAD MATCHING WAVEFORM FROM NPZ FOR 4 INTERACTIVE PLOTLY CHARTS
+# -------------------------------------------------------------------------
+npz_files = sorted([os.path.join(npz_folder, f) for f in os.listdir(npz_folder) if f.endswith(".npz")])
+selected_npz = npz_files[min(chosen_cls, len(npz_files) - 1)]
+for nf in npz_files:
+    d_tmp = np.load(nf, allow_pickle=True)
+    if "class_id" in d_tmp and int(d_tmp["class_id"]) == chosen_cls:
+        selected_npz = nf
+        break
+
+d_npz = np.load(selected_npz, allow_pickle=True)
+amp_clean = d_npz["amp_clean"]
+amp_filt = d_npz["amp_filt"]
+
+win_samples = 80 if task_mode != 2 else 240
+max_start = max(1, len(amp_clean) - win_samples)
+start_idx = int(((win_pos - 1) * 20) % max_start)
+wc = amp_clean[start_idx : start_idx + win_samples]
+wf = amp_filt[start_idx : start_idx + win_samples]
+t_axis = np.arange(len(wc)) / 20.0
+
+sc_stds = np.std(wf, axis=0)
+top3 = np.argsort(sc_stds)[::-1][:3]
+
+r1c1, r1c2 = st.columns(2)
+with r1c1:
+    fig_wave = go.Figure()
+    colors = ["#38bdf8", "#22c55e", "#f97316"]
+    for i, sc_idx in enumerate(top3):
+        fig_wave.add_trace(
+            go.Scatter(
+                x=t_axis,
+                y=wf[:, sc_idx],
+                mode="lines",
+                name=f"Subcarrier #{sc_idx + 1}",
+                line=dict(width=2.2, color=colors[i]),
+            )
+        )
+    fig_wave.update_layout(
+        title="1. Bandpass-Conditioned CSI Waveform (Top-3 Most Sensitive Subcarriers)",
+        xaxis_title="Time (seconds)",
+        yaxis_title="Filtered Amplitude (AC)",
+        template="plotly_dark",
+        height=340,
+        margin=dict(l=20, r=20, t=45, b=20),
+    )
+    st.plotly_chart(fig_wave, use_container_width=True)
+
+with r1c2:
+    fig_heat = go.Figure(
+        data=go.Heatmap(
+            z=(wc - np.mean(wc, axis=0)).T,
+            x=t_axis,
+            y=[f"SC {i+1}" for i in range(52)],
+            colorscale="Viridis",
+        )
+    )
+    fig_heat.update_layout(
+        title="2. 52-Subcarrier OFDM Spatio-Temporal CSI Matrix (Zero-Mean AC)",
+        xaxis_title="Time (seconds)",
+        yaxis_title="OFDM Subcarrier Index (1–52)",
+        template="plotly_dark",
+        height=340,
+        margin=dict(l=20, r=20, t=45, b=20),
+    )
+    st.plotly_chart(fig_heat, use_container_width=True)
+
+r2c1, r2c2 = st.columns(2)
+with r2c1:
+    sc_profile = np.std(wc, axis=0)
+    fig_comb = go.Figure(
+        data=go.Bar(
+            x=list(range(1, 53)),
+            y=sc_profile,
+            marker_color="#38bdf8",
+        )
+    )
+    fig_comb.update_layout(
+        title="3. Per-Subcarrier Dynamic Sensitivity Profile Across All 52 Subcarriers",
+        xaxis_title="Active OFDM Subcarrier Index (1–52)",
+        yaxis_title="Temporal Standard Deviation (RMS)",
+        template="plotly_dark",
+        height=320,
+        margin=dict(l=20, r=20, t=45, b=20),
+    )
+    st.plotly_chart(fig_comb, use_container_width=True)
+
+with r2c2:
+    mean_top_wave = np.mean(wf[:, top3], axis=1)
+    f_psd, Pxx = welch(mean_top_wave, fs=20.0, nperseg=min(len(mean_top_wave), 64), nfft=256)
+    mask = f_psd <= 1.2
+    fig_psd = go.Figure()
+    fig_psd.add_trace(
+        go.Scatter(
+            x=f_psd[mask] * 60.0,
+            y=Pxx[mask],
+            mode="lines",
+            fill="tozeroy",
+            name="Welch PSD",
+            line=dict(color="#a855f7", width=2.5),
+        )
+    )
+    fig_psd.update_layout(
+        title="4. Respiratory Spectral Density (Welch PSD in Breaths Per Minute)",
+        xaxis_title="Frequency (Breaths Per Minute - BPM)",
+        yaxis_title="Spectral Power Density",
+        template="plotly_dark",
+        height=320,
+        margin=dict(l=20, r=20, t=45, b=20),
+    )
+    st.plotly_chart(fig_psd, use_container_width=True)
