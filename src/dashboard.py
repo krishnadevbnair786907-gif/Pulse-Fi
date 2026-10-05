@@ -216,7 +216,7 @@ with k2:
         f"""<div class="kpi-card">
         <div class="kpi-title">ENSEMBLE CONFIDENCE</div>
         <div class="kpi-value">{conf_pct:.1f}%</div>
-        <div class="kpi-sub">Random Forest + Bi-LSTM Soft Vote</div>
+        <div class="kpi-sub">Random Forest Classifier (D8 Final)</div>
         </div>""",
         unsafe_allow_html=True,
     )
