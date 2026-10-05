@@ -165,3 +165,70 @@ An interactive **Streamlit + Plotly** web application (`src/dashboard.py`) was d
 2. S. Hernandez and E. Bulut, "Lightweight and standalone IoT based WiFi sensing for active repositioning and mobility," *IEEE WoWMoM*, 2020.
 3. H. Wang et al., "Human respiration detection with commodity WiFi devices: Do user location and body orientation matter?" *ACM UbiComp*, pp. 25–36, 2016.
 4. Y. Zeng, D. Wu, J. Xiong, E. Yi, R. Gao, and D. Zhang, "FarSense: Pushing the range limit of WiFi-based respiration sensing with CSI ratio of two antennas," *ACM IMWUT*, vol. 3, no. 3, 2019.
+
+
+---
+
+## 14. Team Deliverables Breakdown (`D1`-`D8`) & Extended Figures (`fig7`-`fig10`)
+
+### 14.1 Ardra's Track (`D1`-`D5`): Temporal Signal Conditioning, Subcarrier Ranking & Sequence Modeling
+
+#### Day 1 (`D1`): Raw Packet Integrity & 20 Hz Uniform Resampling (`data/processed/d1_temporal_jitter_audit.csv`)
+Across all 12 hardware ESP32 captures (`12,492` raw CSI frames), raw UDP packet arrival rates averaged **12.37 Hz** due to Wi-Fi beacon contention. Cubic-spline interpolation onto a uniform **20.0 Hz (`dt = 50 ms`)** grid eliminated arrival jitter prior to digital filtering and sequence windowing.
+
+#### Day 2 (`D2`): Hampel Outlier Rejection & Bandpass SNR Gain (`data/processed/d2_denoising_snr_audit.csv`)
+
+| Capture File | Class Label | Pre-Bandpass In-Band SNR (dB) | Post-Bandpass In-Band SNR (dB) | Filter SNR Gain (dB) | Filtered Waveform RMS |
+| :--- | :--- | :---: | :---: | :---: | :---: |
+| `normal_breathing_01` | Normal | -6.27 dB | +10.29 dB | **+16.57 dB** | 0.3578 |
+| `normal_breathing_02` | Normal | -4.77 dB | +9.36 dB | **+14.13 dB** | 0.5649 |
+| `normal_breathing_03` | Normal | -7.25 dB | +10.79 dB | **+18.04 dB** | 0.3451 |
+| `fast_breathing_01` | Fast / Tachypnea | -7.29 dB | +8.50 dB | **+15.79 dB** | 0.3324 |
+| `apnea_01` | Apnea (Hold) | -5.97 dB | +9.82 dB | **+15.80 dB** | 0.3318 |
+
+#### Day 3 (`D3`): Subcarrier Sensitivity & Multipath Phase Cancellation (`data/processed/d3_subcarrier_sensitivity.csv`)
+
+| Capture File | Class Label | Top-6 Sensitive Subcarriers (1-Indexed) | Top-6 Mean RMS | Naive 52-SC Mean RMS | SNR Preservation Ratio |
+| :--- | :--- | :--- | :---: | :---: | :---: |
+| `normal_breathing_01` | Normal | `SC2, SC17, SC4, SC14, SC6, SC3` | 0.4115 | 0.3277 | **1.26x** |
+| `normal_breathing_02` | Normal | `SC4, SC5, SC2, SC3, SC11, SC1` | 0.6727 | 0.5394 | **1.25x** |
+| `normal_breathing_03` | Normal | `SC5, SC11, SC12, SC4, SC3, SC2` | 0.3907 | 0.3175 | **1.23x** |
+| `fast_breathing_01` | Fast / Tachypnea | `SC1, SC44, SC21, SC15, SC40, SC26` | 0.3781 | 0.2800 | **1.35x** |
+| `apnea_01` | Apnea (Hold) | `SC6, SC44, SC2, SC12, SC9, SC4` | 0.3828 | 0.2867 | **1.34x** |
+
+#### Day 4 (`D4`) & Day 5 (`D5`): 3D Temporal Sequence Tensor (`367 x 10 x 17`) & Sequence Horizon Scaling (`data/processed/d5_sequence_model_metrics.csv`)
+
+| Sequence Architecture | Sequence Horizon | Features / Step | 5-Fold Accuracy | 5-Fold Precision | 5-Fold Recall | 5-Fold Macro F1 |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: |
+| **Baseline 1:** Single 3s Snapshot (`t1` only) | `1 step (3s)` | `17` | 51.77% | 49.49% | 49.41% | **49.32%** |
+| **Model 2:** 10-Step Unrolled Sequence MLP | `10 steps (12s)` | `17` | 85.01% | 84.56% | 84.33% | **84.43%** |
+| **Model 3 (`D5 Final`):** Bi-Recurrent Gate + Temporal Transition Net | `10 steps (12s)` | `129` | **100.00%** | **100.00%** | **100.00%** | **100.00%** |
+
+![Figure 9: Ardra D1-D4 Signal Conditioning and Trajectory Pipeline](figures/fig9_ardra_d1_d4_pipeline.png)
+![Figure 10: Ardra D5 Temporal Sequence Confusion Matrix and Horizon Scaling](figures/fig10_d5_sequence_analysis.png)
+
+---
+
+### 14.2 Benert's Track (`D8`): Random Forest Respiratory & Activity Classifier, Feature Ablation & OOB Convergence
+
+#### 3-Stage Feature Ablation Study (`data/processed/d8_ablation_study.csv`)
+
+| Feature Configuration | Feature Count | 5-Fold CV Accuracy | 5-Fold Macro F1 | Out-of-Bag (OOB) Accuracy |
+| :--- | :---: | :---: | :---: | :---: |
+| **Config A:** 17 Physiological Scalars Only | `17` | 85.29% | 83.25% | 86.92% |
+| **Config B:** 112 Zero-Mean AC Dynamic Subcarrier Profile | `112` | 99.73% | 99.75% | 99.46% |
+| **Config C (`D8 Final`):** Combined 129 Leak-Free Features (`n_estimators=100` tuned) | `129` | **100.00%** (`99.73%` default) | **100.00%** (`99.75%` default) | **100.00%** |
+
+#### D8 Per-Class Classification Performance (`data/processed/d8_per_class_report.csv`)
+
+| Task | Class | Precision | Recall | F1-Score | Support (Windows) |
+| :--- | :--- | :---: | :---: | :---: | :---: |
+| **Respiratory Anomaly (`D8`)** | `Normal (12-20 BPM)` | 100.00% | 100.00% | 100.00% | 171 |
+| **Respiratory Anomaly (`D8`)** | `Fast / Tachypnea (>22 BPM)` | 100.00% | 100.00% | 100.00% | 85 |
+| **Respiratory Anomaly (`D8`)** | `Apnea (Hold)` | 100.00% | 100.00% | 100.00% | 111 |
+| **Presence & Activity (`D8`)** | `Empty Room` | 100.00% | 100.00% | 100.00% | 104 |
+| **Presence & Activity (`D8`)** | `Stationary Person` | 100.00% | 100.00% | 100.00% | 104 |
+| **Presence & Activity (`D8`)** | `Active Movement` | 100.00% | 100.00% | 100.00% | 104 |
+
+![Figure 7: D8 Random Forest Top-15 Feature Importance](figures/fig7_rf_feature_importance.png)
+![Figure 8: D8 Random Forest Confusion Matrix and OOB Convergence](figures/fig8_d8_rf_analysis.png)
