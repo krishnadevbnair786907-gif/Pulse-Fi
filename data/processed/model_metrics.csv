@@ -1,0 +1,13 @@
+task,model,accuracy_pct,macro_precision_pct,macro_recall_pct,macro_f1_pct
+presence,Random Forest,100.0,100.0,100.0,100.0
+presence,Extra Trees,100.0,100.0,100.0,100.0
+presence,SVM (RBF),99.68,99.73,99.68,99.7
+presence,MLP Neural Net,99.68,99.73,99.68,99.7
+rf_fingerprinting,Random Forest,100.0,100.0,100.0,100.0
+rf_fingerprinting,Extra Trees,100.0,100.0,100.0,100.0
+rf_fingerprinting,SVM (RBF),100.0,100.0,100.0,100.0
+rf_fingerprinting,MLP Neural Net,100.0,100.0,100.0,100.0
+respiratory,Random Forest,99.73,99.7,99.81,99.75
+respiratory,Extra Trees,100.0,100.0,100.0,100.0
+respiratory,SVM (RBF),100.0,100.0,100.0,100.0
+respiratory,MLP Neural Net,100.0,100.0,100.0,100.0

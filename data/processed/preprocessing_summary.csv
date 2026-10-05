@@ -1,0 +1,13 @@
+category,file,label,raw_packets,valid_packets,duration_s,mean_rssi_dbm,resampled_frames_20hz,active_subcarriers
+presence,empty.csv,empty,1506,643,66.68,-85.04,1334,52
+presence,empty_02.csv,empty,1018,993,89.13,-54.76,1783,52
+presence,moving.csv,moving,917,893,80.06,-53.43,1602,52
+presence,moving_02.csv,moving,929,903,81.3,-61.81,1627,52
+rf_fingerprinting,zone1_1m.csv,zone_1m,749,725,65.02,-56.05,1301,52
+rf_fingerprinting,zone2_2m.csv,zone_2m,670,644,57.9,-55.82,1158,52
+rf_fingerprinting,zone3_3m.csv,zone_3m,823,799,71.53,-58.03,1431,52
+respiratory,normal_breathing_01.csv,normal,1442,1423,127.77,-50.16,2556,52
+respiratory,normal_breathing_02.csv,normal,1432,1415,127.02,-53.67,2541,52
+respiratory,normal_breathing_03.csv,normal,1374,1357,121.85,-50.67,2438,52
+respiratory,fast_breathing_01.csv,tachypnea_fast,721,697,62.45,-61.62,1249,52
+respiratory,apnea_01.csv,apnea_hold,899,875,78.41,-60.04,1569,52
