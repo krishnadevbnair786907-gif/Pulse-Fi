@@ -1,0 +1,4 @@
+Deliverable,Class,Precision_Pct,Recall_Pct,F1_Score_Pct,Support_Sequences
+D5 Temporal Sequence Model,Normal (12-20 BPM),100.0,100.0,100.0,171
+D5 Temporal Sequence Model,Fast / Tachypnea (>22 BPM),100.0,100.0,100.0,85
+D5 Temporal Sequence Model,Apnea (Hold),100.0,100.0,100.0,111

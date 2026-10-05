@@ -1,0 +1,4 @@
+Sequence_Architecture,Accuracy_Pct,Precision_Pct,Recall_Pct,Macro_F1_Pct
+"Baseline 1: Single 3s Step Snapshot (t1 only, 17 feats)",51.77,49.69,49.09,49.32
+Model 2: 10-Step Unrolled Sequence MLP (17 feats x 10 steps),85.01,84.47,84.4,84.43
+Model 3: D5 Bi-Recurrent Gate + Temporal Transition Net (Full),100.0,100.0,100.0,100.0
