@@ -1,0 +1,4 @@
+Configuration,Num_Features,CV_Accuracy_Pct,CV_Macro_F1_Pct,OOB_Score_Pct
+Config A: 17 Physiological Scalars Only,17,85.29,83.25,86.92
+Config B: 112 Zero-Mean AC Dynamic Profile,112,99.73,99.75,99.46
+Config C: Combined 129 Leak-Free Features (D8 Final),129,99.73,99.75,100.0

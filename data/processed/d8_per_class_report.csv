@@ -1,0 +1,7 @@
+Task,Class,Precision_Pct,Recall_Pct,F1_Score_Pct,Support_Windows
+Respiratory Anomaly (D8),Normal (12-20 BPM),100.0,100.0,100.0,171
+Respiratory Anomaly (D8),Fast / Tachypnea (>22 BPM),100.0,100.0,100.0,85
+Respiratory Anomaly (D8),Apnea (Hold),100.0,100.0,100.0,111
+Presence & Activity (D8),Empty Room,100.0,100.0,100.0,86
+Presence & Activity (D8),Stationary Person,100.0,100.0,100.0,123
+Presence & Activity (D8),Active Movement,100.0,100.0,100.0,103
