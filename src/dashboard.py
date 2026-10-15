@@ -161,6 +161,12 @@ if "LIVE" in mode:
     
     ser = serial.Serial(port, 115200, timeout=1.0)
     buffer = deque(maxlen=80)
+    
+    # --- NEW: STABILIZATION BUFFERS ---
+    # Keep track of the last 7 predictions (about 5 seconds) for majority voting
+    pred_history = deque(maxlen=7)
+    bpm_history = deque(maxlen=5)
+    
     pkt_counter = 0
 
     while True:
@@ -174,29 +180,41 @@ if "LIVE" in mode:
                 if len(buffer) == 80 and pkt_counter % 15 == 0:
                     buf_arr = np.array(buffer, dtype=np.float32)
                     wc, wf = condition_live_buffer(buf_arr)
-                    feats, sig_rms, diff_rms, est_bpm, top_sig = extract_live_128_features(wc, wf)
+                    feats, sig_rms, diff_rms, raw_bpm, top_sig = extract_live_128_features(wc, wf)
                     
                     if st.session_state.calib_floor == "PENDING":
                         st.session_state.calib_floor = max(0.2, sig_rms)
                         
-                    # Model Prediction
+                    # Model Prediction (Raw)
                     if pres_model is not None:
                         x_in = pres_scaler.transform(feats.reshape(1, -1)) if pres_scaler else feats.reshape(1, -1)
-                        pred_cls = int(pres_model.predict(x_in)[0])
+                        raw_pred_cls = int(pres_model.predict(x_in)[0])
                         conf = float(np.max(pres_model.predict_proba(x_in)[0]) * 100.0)
                     else:
                         motion_ratio = sig_rms / st.session_state.calib_floor
-                        if motion_ratio < 1.35: pred_cls, conf = 0, 98.0
-                        elif motion_ratio >= 2.6: pred_cls, conf = 2, 95.0
-                        else: pred_cls, conf = 1, 92.0
+                        if motion_ratio < 1.35: raw_pred_cls, conf = 0, 98.0
+                        elif motion_ratio >= 2.6: raw_pred_cls, conf = 2, 95.0
+                        else: raw_pred_cls, conf = 1, 92.0
                     
-                    # Force override if signal is massively spiking (model safeguard)
-                    if diff_rms > 1.8: pred_cls = 2
+                    # Force override if signal is massively spiking (avoids model missing big steps)
+                    if diff_rms > 2.5: raw_pred_cls = 2
 
+                    # --- TEMPORAL SMOOTHING (MAJORITY VOTE) ---
+                    pred_history.append(raw_pred_cls)
+                    
+                    # Calculate the most common prediction in the last 7 windows
+                    pred_cls = max(set(pred_history), key=pred_history.count)
+                    
+                    # Smooth the BPM too
+                    if pred_cls == 1:
+                        bpm_history.append(raw_bpm)
+                    avg_bpm = np.mean(bpm_history) if len(bpm_history) > 0 else 15.6
+
+                    # Format UI based on the STABILIZED prediction
                     if pred_cls == 0:
                         state_txt, sub_txt, color, bpm_str = "EMPTY ROOM", "No human presence", "#22c55e", "0.0 BPM"
                     elif pred_cls == 1:
-                        state_txt, sub_txt, color, bpm_str = "STATIONARY PERSON", "Breathing detected", "#eab308", f"{est_bpm:.1f} BPM"
+                        state_txt, sub_txt, color, bpm_str = "STATIONARY PERSON", "Breathing detected", "#eab308", f"{avg_bpm:.1f} BPM"
                     else:
                         state_txt, sub_txt, color, bpm_str = "ACTIVE MOVEMENT", "Person walking", "#ef4444", "Motion Masked"
                     
@@ -205,7 +223,7 @@ if "LIVE" in mode:
                         <div class="kpi-value" style="color:{color};">{'🟢' if pred_cls==0 else '🟡' if pred_cls==1 else '🔴'} {state_txt}</div>
                         <div class="kpi-sub">{sub_txt}</div></div>""", unsafe_allow_html=True)
                     ph_k2.markdown(f"""<div class="kpi-card"><div class="kpi-title">ENSEMBLE CONFIDENCE</div>
-                        <div class="kpi-value">{conf:.1f}%</div><div class="kpi-sub">Live 4-Second Window</div></div>""", unsafe_allow_html=True)
+                        <div class="kpi-value">{conf:.1f}%</div><div class="kpi-sub">Stabilized Output</div></div>""", unsafe_allow_html=True)
                     ph_k3.markdown(f"""<div class="kpi-card"><div class="kpi-title">RESPIRATORY RATE</div>
                         <div class="kpi-value">{bpm_str}</div><div class="kpi-sub">0.14–0.65 Hz Bandpass</div></div>""", unsafe_allow_html=True)
                     ph_k4.markdown(f"""<div class="kpi-card"><div class="kpi-title">CSI ENERGY (RMS / VEL)</div>
