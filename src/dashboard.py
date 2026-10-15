@@ -103,30 +103,46 @@ if "LIVE" in mode:
             
     st.success(f"Connected to ESP32 Receiver on `{port}` @ 115200 baud. **Ensure line-of-sight is clear and press 'Calibrate'.**")
     
+    # --- FAIL-SAFE: Preserve buffers and serial connection across button clicks ---
+    if "live_buffer" not in st.session_state:
+        st.session_state.live_buffer = deque(maxlen=80)
+        st.session_state.pred_history = deque(maxlen=7)
+        st.session_state.bpm_history = deque(maxlen=5)
+        st.session_state.pkt_counter = 0
+
+    try:
+        if "ser" in st.session_state and st.session_state.ser.is_open:
+            st.session_state.ser.close()
+    except Exception:
+        pass
+        
+    try:
+        st.session_state.ser = serial.Serial(port, 115200, timeout=1.0)
+    except Exception as e:
+        st.error(f"Port busy. Unplug and replug the ESP32 USB cable, then refresh the page. ({e})")
+        st.stop()
+    
     k1, k2, k3, k4 = st.columns(4)
     ph_k1, ph_k2, ph_k3, ph_k4 = k1.empty(), k2.empty(), k3.empty(), k4.empty()
     c1, c2 = st.columns(2)
     ph_chart1, ph_chart2 = c1.empty(), c2.empty()
     
-    ser = serial.Serial(port, 115200, timeout=1.0)
-    buffer = deque(maxlen=80)
-    
-    # 7-window temporal majority voting (highly stable)
-    pred_history = deque(maxlen=7)
-    bpm_history = deque(maxlen=5)
-    
-    pkt_counter = 0
+    # Show loading state so UI doesn't disappear if buffer is empty
+    if len(st.session_state.live_buffer) < 80:
+        ph_k1.info("⏳ Buffering Live CSI Data... (Please wait ~4 seconds)")
+        ph_chart1.info("Listening for ESP32 packets...")
+        ph_chart2.info("Building 52-subcarrier matrix...")
 
     while True:
         try:
-            raw_line = ser.readline().decode("utf-8", errors="ignore")
+            raw_line = st.session_state.ser.readline().decode("utf-8", errors="ignore")
             amps = parse_csi_line(raw_line)
             if amps is not None:
-                buffer.append(amps)
-                pkt_counter += 1
+                st.session_state.live_buffer.append(amps)
+                st.session_state.pkt_counter += 1
                 
-                if len(buffer) == 80 and pkt_counter % 15 == 0:
-                    buf_arr = np.array(buffer, dtype=np.float32)
+                if len(st.session_state.live_buffer) == 80 and st.session_state.pkt_counter % 15 == 0:
+                    buf_arr = np.array(st.session_state.live_buffer, dtype=np.float32)
                     wc, wf = condition_live_buffer(buf_arr)
                     sig_rms, diff_rms, raw_bpm, top_sig = extract_live_metrics(wc, wf)
                     
@@ -147,11 +163,11 @@ if "LIVE" in mode:
                         raw_pred_cls = 1
                         conf = min(99.9, 88.0 + min(11.9, motion_ratio * 3.0))
 
-                    pred_history.append(raw_pred_cls)
-                    pred_cls = max(set(pred_history), key=pred_history.count)
+                    st.session_state.pred_history.append(raw_pred_cls)
+                    pred_cls = max(set(st.session_state.pred_history), key=st.session_state.pred_history.count)
                     
-                    if pred_cls == 1: bpm_history.append(raw_bpm)
-                    avg_bpm = np.mean(bpm_history) if len(bpm_history) > 0 else 15.6
+                    if pred_cls == 1: st.session_state.bpm_history.append(raw_bpm)
+                    avg_bpm = np.mean(st.session_state.bpm_history) if len(st.session_state.bpm_history) > 0 else 15.6
 
                     if pred_cls == 0:
                         state_txt, sub_txt, color, bpm_str = "EMPTY ROOM", "No human presence", "#22c55e", "0.0 BPM"
