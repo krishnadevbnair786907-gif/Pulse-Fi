@@ -103,10 +103,10 @@ if "LIVE" in mode:
             
     st.success(f"Connected to ESP32 Receiver on `{port}` @ 115200 baud. **Ensure line-of-sight is clear and press 'Calibrate'.**")
     
-    # --- FAIL-SAFE: Preserve buffers and serial connection across button clicks ---
     if "live_buffer" not in st.session_state:
         st.session_state.live_buffer = deque(maxlen=80)
-        st.session_state.pred_history = deque(maxlen=7)
+        # Increased memory to 12 windows (~9 seconds) to smooth out slow breathing cycles
+        st.session_state.pred_history = deque(maxlen=12)
         st.session_state.bpm_history = deque(maxlen=5)
         st.session_state.pkt_counter = 0
 
@@ -119,7 +119,7 @@ if "LIVE" in mode:
     try:
         st.session_state.ser = serial.Serial(port, 115200, timeout=1.0)
     except Exception as e:
-        st.error(f"Port busy. Unplug and replug the ESP32 USB cable, then refresh the page. ({e})")
+        st.error(f"Port busy. Unplug and replug the ESP32 USB cable, then refresh the page.")
         st.stop()
     
     k1, k2, k3, k4 = st.columns(4)
@@ -127,11 +127,8 @@ if "LIVE" in mode:
     c1, c2 = st.columns(2)
     ph_chart1, ph_chart2 = c1.empty(), c2.empty()
     
-    # Show loading state so UI doesn't disappear if buffer is empty
     if len(st.session_state.live_buffer) < 80:
         ph_k1.info("⏳ Buffering Live CSI Data... (Please wait ~4 seconds)")
-        ph_chart1.info("Listening for ESP32 packets...")
-        ph_chart2.info("Building 52-subcarrier matrix...")
 
     while True:
         try:
@@ -149,19 +146,22 @@ if "LIVE" in mode:
                     if st.session_state.calib_floor == "PENDING":
                         st.session_state.calib_floor = max(0.15, sig_rms)
                         
-                    # ADAPTIVE RATIO ENGINE (Bulletproof for any room)
                     motion_ratio = sig_rms / st.session_state.calib_floor
                     vel_ratio = diff_rms / (st.session_state.calib_floor + 1e-6)
                     
-                    if motion_ratio < 1.45 and vel_ratio < 1.3:
-                        raw_pred_cls = 0
-                        conf = min(99.9, max(92.0, 100 - (motion_ratio * 10)))
-                    elif motion_ratio > 2.8 or vel_ratio > 1.8:
+                    # TUNED SENSITIVITY THRESHOLDS
+                    # It is now much easier to trigger Active Movement (lowered from 2.8 to 1.9)
+                    if motion_ratio > 1.9 or vel_ratio > 1.5:
                         raw_pred_cls = 2
-                        conf = min(99.9, 90.0 + min(9.9, motion_ratio * 2.0))
-                    else:
+                        conf = min(99.9, 90.0 + min(9.9, motion_ratio * 3.0))
+                    # It is now much easier to hold Stationary through slow breathing (lowered from 1.45 to 1.15)
+                    elif motion_ratio > 1.15 or vel_ratio > 1.1:
                         raw_pred_cls = 1
-                        conf = min(99.9, 88.0 + min(11.9, motion_ratio * 3.0))
+                        conf = min(99.9, 88.0 + min(11.9, motion_ratio * 4.0))
+                    # Otherwise, strictly Empty Room
+                    else:
+                        raw_pred_cls = 0
+                        conf = min(99.9, max(92.0, 100 - (motion_ratio * 15)))
 
                     st.session_state.pred_history.append(raw_pred_cls)
                     pred_cls = max(set(st.session_state.pred_history), key=st.session_state.pred_history.count)
