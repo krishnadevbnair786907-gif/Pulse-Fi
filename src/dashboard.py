@@ -80,7 +80,7 @@ def extract_live_metrics(wc, wf, fs=20.0):
 
 # ---------------- UI LAYOUT ----------------
 st.markdown("# 📡 Pulse-Fi: Live Hardware Control Center")
-st.caption("Auto-detects ESP32 on macOS USB. Streams real-time CSI packets dynamically adjusted to room conditions.")
+st.caption("Auto-detects ESP32 on macOS USB. Features live sensitivity tuning for variable room distances.")
 
 mode = st.radio("Dashboard Mode:", ["🎛️ Playback Demo (Recorded Files)", "📡 LIVE ESP32 HARDWARE STREAM"], horizontal=True)
 
@@ -90,23 +90,25 @@ if "LIVE" in mode:
         st.error("⚠️ No ESP32 detected on USB. Please plug in the receiver board and verify `/dev/cu.usbserial*`.")
         st.stop()
         
-    c_btn1, c_btn2, _ = st.columns([2, 2, 6])
+    st.markdown("### ⚙️ Live System Calibration & Tuning")
+    c_btn1, c_btn2, c_t1, c_t2 = st.columns([1.5, 1.5, 3.5, 3.5])
     with c_btn1:
-        if st.button("⏹️ Stop Live Stream"): st.stop()
+        if st.button("⏹️ Stop Stream"): st.stop()
+    with c_btn2:
+        if st.button("🎯 Calibrate Empty"): st.session_state.calib_floor = "PENDING"
+    with c_t1:
+        stat_thresh = st.slider("🟡 Stationary Trigger Ratio", 1.01, 1.30, 1.05, 0.01, help="If stuck on Empty, lower this.")
+    with c_t2:
+        move_thresh = st.slider("🔴 Movement Trigger Ratio", 1.10, 2.50, 1.25, 0.05, help="If stuck on Stationary when walking, lower this.")
     
     if "calib_floor" not in st.session_state:
         st.session_state.calib_floor = 0.45
         
-    with c_btn2:
-        if st.button("🎯 Calibrate Empty Room"):
-            st.session_state.calib_floor = "PENDING"
-            
-    st.success(f"Connected to ESP32 Receiver on `{port}` @ 115200 baud. **Ensure line-of-sight is clear and press 'Calibrate'.**")
+    st.success(f"Connected to ESP32 on `{port}`. **Step 1:** Clear the room and click Calibrate. **Step 2:** Watch the Live Ratio below and tune the sliders.")
     
     if "live_buffer" not in st.session_state:
         st.session_state.live_buffer = deque(maxlen=80)
-        # Increased memory to 12 windows (~9 seconds) to smooth out slow breathing cycles
-        st.session_state.pred_history = deque(maxlen=12)
+        st.session_state.pred_history = deque(maxlen=9)
         st.session_state.bpm_history = deque(maxlen=5)
         st.session_state.pkt_counter = 0
 
@@ -128,7 +130,7 @@ if "LIVE" in mode:
     ph_chart1, ph_chart2 = c1.empty(), c2.empty()
     
     if len(st.session_state.live_buffer) < 80:
-        ph_k1.info("⏳ Buffering Live CSI Data... (Please wait ~4 seconds)")
+        ph_k1.info("⏳ Buffering Live CSI Data... (~4 seconds)")
 
     while True:
         try:
@@ -144,24 +146,18 @@ if "LIVE" in mode:
                     sig_rms, diff_rms, raw_bpm, top_sig = extract_live_metrics(wc, wf)
                     
                     if st.session_state.calib_floor == "PENDING":
-                        st.session_state.calib_floor = max(0.15, sig_rms)
+                        st.session_state.calib_floor = max(0.05, sig_rms)
                         
                     motion_ratio = sig_rms / st.session_state.calib_floor
                     vel_ratio = diff_rms / (st.session_state.calib_floor + 1e-6)
                     
-                    # TUNED SENSITIVITY THRESHOLDS
-                    # It is now much easier to trigger Active Movement (lowered from 2.8 to 1.9)
-                    if motion_ratio > 1.9 or vel_ratio > 1.5:
+                    # TUNED INTERACTIVE THRESHOLDS
+                    if motion_ratio >= move_thresh or vel_ratio >= (move_thresh * 0.8):
                         raw_pred_cls = 2
-                        conf = min(99.9, 90.0 + min(9.9, motion_ratio * 3.0))
-                    # It is now much easier to hold Stationary through slow breathing (lowered from 1.45 to 1.15)
-                    elif motion_ratio > 1.15 or vel_ratio > 1.1:
+                    elif motion_ratio >= stat_thresh or vel_ratio >= (stat_thresh * 0.9):
                         raw_pred_cls = 1
-                        conf = min(99.9, 88.0 + min(11.9, motion_ratio * 4.0))
-                    # Otherwise, strictly Empty Room
                     else:
                         raw_pred_cls = 0
-                        conf = min(99.9, max(92.0, 100 - (motion_ratio * 15)))
 
                     st.session_state.pred_history.append(raw_pred_cls)
                     pred_cls = max(set(st.session_state.pred_history), key=st.session_state.pred_history.count)
@@ -180,8 +176,11 @@ if "LIVE" in mode:
                         <div class="kpi-title">LIVE ADAPTIVE ENGINE</div>
                         <div class="kpi-value" style="color:{color};">{'🟢' if pred_cls==0 else '🟡' if pred_cls==1 else '🔴'} {state_txt}</div>
                         <div class="kpi-sub">{sub_txt}</div></div>""", unsafe_allow_html=True)
-                    ph_k2.markdown(f"""<div class="kpi-card"><div class="kpi-title">SYSTEM CONFIDENCE</div>
-                        <div class="kpi-value">{conf:.1f}%</div><div class="kpi-sub">Stabilized Output</div></div>""", unsafe_allow_html=True)
+                    
+                    # NEW: Show the actual ratio on screen so the user can tune the sliders perfectly!
+                    ph_k2.markdown(f"""<div class="kpi-card"><div class="kpi-title">LIVE SIGNAL RATIO</div>
+                        <div class="kpi-value">{motion_ratio:.3f}x</div><div class="kpi-sub">Set sliders based on this number</div></div>""", unsafe_allow_html=True)
+                    
                     ph_k3.markdown(f"""<div class="kpi-card"><div class="kpi-title">RESPIRATORY RATE</div>
                         <div class="kpi-value">{bpm_str}</div><div class="kpi-sub">0.14–0.65 Hz Bandpass</div></div>""", unsafe_allow_html=True)
                     ph_k4.markdown(f"""<div class="kpi-card"><div class="kpi-title">CSI ENERGY (RMS / VEL)</div>
