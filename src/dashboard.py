@@ -95,16 +95,19 @@ if "LIVE" in mode:
     with c_btn:
         if st.button("⏹️ Stop Stream"): st.stop()
     with c_t1:
-        stat_thresh = st.slider("🟡 Min Energy for Person (RMS)", 0.20, 5.00, 1.00, 0.10, help="If RMS is higher than this, room is occupied.")
+        # LOWERED MINIMUM TO 0.01 SO IT CAN CATCH FAINT BREATHING
+        stat_thresh = st.slider("🟡 Min Energy for Person (RMS)", 0.01, 2.00, 0.25, 0.01)
     with c_t2:
-        move_thresh = st.slider("🔴 Min Velocity for Movement (VEL)", 0.10, 2.00, 0.35, 0.05, help="If VEL is higher than this, person is moving.")
+        # LOWERED MINIMUM TO 0.01 SO IT CAN CATCH FAINT WALKING
+        move_thresh = st.slider("🔴 Min Velocity for Movement (VEL)", 0.01, 1.00, 0.15, 0.01)
     
     st.success(f"Connected to ESP32 on `{port}`. **Look at the far-right CSI ENERGY card. Adjust the sliders to match your live numbers!**")
     
     if "live_buffer" not in st.session_state:
         st.session_state.live_buffer = deque(maxlen=80)
-        st.session_state.pred_history = deque(maxlen=9)
-        st.session_state.bpm_history = deque(maxlen=5)
+        # REDUCED DELAY: Reacts in ~3 seconds instead of 6
+        st.session_state.pred_history = deque(maxlen=5)
+        st.session_state.bpm_history = deque(maxlen=3)
         st.session_state.pkt_counter = 0
 
     try:
