@@ -16,24 +16,12 @@ try:
 except ImportError:
     serial = None
 
-st.set_page_config(
-    page_title="Pulse-Fi: Contactless Wi-Fi CSI Monitor",
-    page_icon="📡",
-    layout="wide",
-    initial_sidebar_state="collapsed",
-)
+st.set_page_config(page_title="Pulse-Fi: Live Hardware", page_icon="📡", layout="wide", initial_sidebar_state="collapsed")
 
 st.markdown(
     """
     <style>
-    .kpi-card {
-        background: linear-gradient(135deg, #111927 0%, #1a2639 100%);
-        border: 1px solid #2e4057;
-        border-radius: 12px;
-        padding: 16px 18px;
-        text-align: center;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.35);
-    }
+    .kpi-card { background: linear-gradient(135deg, #111927 0%, #1a2639 100%); border: 1px solid #2e4057; border-radius: 12px; padding: 16px 18px; text-align: center; box-shadow: 0 4px 12px rgba(0,0,0,0.35); }
     .kpi-title { font-size: 0.82rem; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 6px; }
     .kpi-value { font-size: 1.45rem; font-weight: 700; color: #f8fafc; margin-bottom: 4px; }
     .kpi-sub { font-size: 0.80rem; color: #38bdf8; }
@@ -41,7 +29,6 @@ st.markdown(
     """, unsafe_allow_html=True
 )
 
-# ---------------- CORE ML & HARDWARE FUNCTIONS ----------------
 ACTIVE_52_INDICES = list(range(6, 32)) + list(range(33, 59))
 FS = 20.0
 
@@ -91,25 +78,56 @@ def condition_live_buffer(buf_arr):
 def extract_live_128_features(wc, wf, fs=20.0):
     b_fast, a_fast = butter(4, [0.34 / (0.5 * fs), 0.70 / (0.5 * fs)], btype="band")
     w_fast = filtfilt(b_fast, a_fast, wc - np.mean(wc, axis=0), axis=0)
+
     sc_stds = np.std(wf, axis=0)
     top_k = np.argsort(sc_stds)[::-1][:6]
     sig = np.mean(wf[:, top_k], axis=1)
     fast_sig = np.mean(w_fast[:, top_k], axis=1)
-    
+
     sig_rms = float(np.std(sig))
+    fast_rms = float(np.std(fast_sig))
+    fast_to_sig_ratio = float(fast_rms / (sig_rms + 1e-6))
     diff_rms = float(np.std(np.diff(sig)))
+    ptp_val = float(np.ptp(sig))
+    iqr_val = float(np.percentile(sig, 75) - np.percentile(sig, 25))
+    zc = float(np.sum(np.diff(np.sign(sig - np.mean(sig))) != 0) / (len(sig) / fs))
+
+    sub_len = int(2.5 * fs)
+    sub_step = max(1, int(0.5 * fs))
+    sub_stds = [np.std(sig[s:s + sub_len]) for s in range(0, len(sig) - sub_len + 1, sub_step)]
+    min_sub_std = float(np.min(sub_stds)) if sub_stds else sig_rms
+    max_sub_std = float(np.max(sub_stds)) if sub_stds else sig_rms
+    dropout_ratio = float(min_sub_std / (max_sub_std + 1e-6))
+    sub_std_cv = float(np.std(sub_stds) / (np.mean(sub_stds) + 1e-6)) if sub_stds else 0.0
+
     f_psd, Pxx = welch(sig, fs=fs, nperseg=min(len(sig), 64), nfft=256)
     valid = (f_psd >= 0.12) & (f_psd <= 0.75)
     f_v, P_v = f_psd[valid], Pxx[valid] + 1e-12
+    P_norm = P_v / np.sum(P_v)
+    spec_ent = float(-np.sum(P_norm * np.log2(P_norm)))
+
+    p_norm_band = float(np.sum(P_v[(f_v >= 0.16) & (f_v <= 0.33)]) / np.sum(P_v))
+    p_fast_band = float(np.sum(P_v[(f_v > 0.33) & (f_v <= 0.68)]) / np.sum(P_v))
+
     dom_freq = float(f_v[np.argmax(P_v)]) if len(P_v) > 0 else 0.25
     est_bpm = float(dom_freq * 60.0)
-    
-    # Fill remaining dummy features to strictly match the 128 shape for the Random Forest
-    feats = np.zeros(128, dtype=np.float32)
-    feats[0] = sig_rms
-    feats[3] = diff_rms
-    feats[12] = est_bpm
-    return feats, sig_rms, diff_rms, est_bpm, sig
+
+    sc_ac_std = np.std(wc, axis=0)
+    sc_ac_std_norm = sc_ac_std / (np.linalg.norm(sc_ac_std) + 1e-8)
+    sc_vel = np.std(np.diff(wc, axis=0), axis=0)
+    sc_vel_norm = sc_vel / (np.linalg.norm(sc_vel) + 1e-8)
+
+    ac_subbands = [float(np.mean(sc_ac_std_norm[i * 13:(i + 1) * 13])) for i in range(4)]
+    vel_subbands = [float(np.mean(sc_vel_norm[i * 13:(i + 1) * 13])) for i in range(4)]
+
+    core_16 = [
+        sig_rms, fast_rms, fast_to_sig_ratio, diff_rms,
+        ptp_val, iqr_val, zc,
+        min_sub_std, max_sub_std, dropout_ratio, sub_std_cv,
+        dom_freq, est_bpm, spec_ent, p_norm_band, p_fast_band
+    ]
+    feats = np.array(core_16 + ac_subbands + vel_subbands + list(sc_ac_std_norm) + list(sc_vel_norm), dtype=np.float32)
+    return feats[:128], sig_rms, diff_rms, est_bpm, sig
 
 # ---------------- UI LAYOUT ----------------
 st.markdown("# 📡 Pulse-Fi: Live Hardware Control Center")
@@ -118,35 +136,32 @@ st.caption("Auto-detects ESP32 on macOS USB. Streams real-time CSI packets direc
 mode = st.radio("Dashboard Mode:", ["🎛️ Playback Demo (Recorded Files)", "📡 LIVE ESP32 HARDWARE STREAM"], horizontal=True)
 
 if "LIVE" in mode:
-    st.markdown("### 🔴 Live Hardware Stream Active")
     port = auto_detect_mac_serial_port()
-    
     if not port or serial is None:
         st.error("⚠️ No ESP32 detected on USB. Please plug in the receiver board and verify `/dev/cu.usbserial*`.")
         st.stop()
         
+    c_btn1, c_btn2, _ = st.columns([2, 2, 6])
+    with c_btn1:
+        if st.button("⏹️ Stop Live Stream"): st.stop()
+    
+    if "calib_floor" not in st.session_state:
+        st.session_state.calib_floor = 0.45
+        
+    with c_btn2:
+        if st.button("🎯 Calibrate Empty Room"):
+            st.session_state.calib_floor = "PENDING"
+            
     st.success(f"Connected to ESP32 Receiver on `{port}` @ 115200 baud.")
     
-    # Create empty placeholders for live updating
     k1, k2, k3, k4 = st.columns(4)
-    ph_k1 = k1.empty()
-    ph_k2 = k2.empty()
-    ph_k3 = k3.empty()
-    ph_k4 = k4.empty()
-    
+    ph_k1, ph_k2, ph_k3, ph_k4 = k1.empty(), k2.empty(), k3.empty(), k4.empty()
     c1, c2 = st.columns(2)
-    ph_chart1 = c1.empty()
-    ph_chart2 = c2.empty()
+    ph_chart1, ph_chart2 = c1.empty(), c2.empty()
     
-    if st.button("⏹️ Stop Live Stream"):
-        st.stop()
-        
     ser = serial.Serial(port, 115200, timeout=1.0)
     buffer = deque(maxlen=80)
     pkt_counter = 0
-    
-    # Determine dynamic noise floor baseline
-    calib_floor = 0.45 
 
     while True:
         try:
@@ -156,36 +171,35 @@ if "LIVE" in mode:
                 buffer.append(amps)
                 pkt_counter += 1
                 
-                # Update dashboard every 15 packets (~0.75 seconds) once buffer is full
                 if len(buffer) == 80 and pkt_counter % 15 == 0:
                     buf_arr = np.array(buffer, dtype=np.float32)
                     wc, wf = condition_live_buffer(buf_arr)
                     feats, sig_rms, diff_rms, est_bpm, top_sig = extract_live_128_features(wc, wf)
                     
-                    # 1. Prediction Logic
+                    if st.session_state.calib_floor == "PENDING":
+                        st.session_state.calib_floor = max(0.2, sig_rms)
+                        
+                    # Model Prediction
                     if pres_model is not None:
                         x_in = pres_scaler.transform(feats.reshape(1, -1)) if pres_scaler else feats.reshape(1, -1)
                         pred_cls = int(pres_model.predict(x_in)[0])
                         conf = float(np.max(pres_model.predict_proba(x_in)[0]) * 100.0)
                     else:
-                        # Fallback threshold logic if model pickle is missing
-                        motion_ratio = sig_rms / calib_floor
+                        motion_ratio = sig_rms / st.session_state.calib_floor
                         if motion_ratio < 1.35: pred_cls, conf = 0, 98.0
                         elif motion_ratio >= 2.6: pred_cls, conf = 2, 95.0
                         else: pred_cls, conf = 1, 92.0
                     
-                    # 2. Format UI Elements
+                    # Force override if signal is massively spiking (model safeguard)
+                    if diff_rms > 1.8: pred_cls = 2
+
                     if pred_cls == 0:
-                        state_txt, sub_txt, color = "EMPTY ROOM", "No human presence", "#22c55e"
-                        bpm_str = "0.0 BPM"
+                        state_txt, sub_txt, color, bpm_str = "EMPTY ROOM", "No human presence", "#22c55e", "0.0 BPM"
                     elif pred_cls == 1:
-                        state_txt, sub_txt, color = "STATIONARY PERSON", "Breathing detected", "#eab308"
-                        bpm_str = f"{est_bpm:.1f} BPM" if 11.0 <= est_bpm <= 30.0 else "15.6 BPM"
+                        state_txt, sub_txt, color, bpm_str = "STATIONARY PERSON", "Breathing detected", "#eab308", f"{est_bpm:.1f} BPM"
                     else:
-                        state_txt, sub_txt, color = "ACTIVE MOVEMENT", "Person walking", "#ef4444"
-                        bpm_str = "Motion Masked"
+                        state_txt, sub_txt, color, bpm_str = "ACTIVE MOVEMENT", "Person walking", "#ef4444", "Motion Masked"
                     
-                    # 3. Inject KPI Cards
                     ph_k1.markdown(f"""<div class="kpi-card" style="border-color:{color};">
                         <div class="kpi-title">LIVE ML CLASSIFICATION</div>
                         <div class="kpi-value" style="color:{color};">{'🟢' if pred_cls==0 else '🟡' if pred_cls==1 else '🔴'} {state_txt}</div>
@@ -197,19 +211,16 @@ if "LIVE" in mode:
                     ph_k4.markdown(f"""<div class="kpi-card"><div class="kpi-title">CSI ENERGY (RMS / VEL)</div>
                         <div class="kpi-value">{sig_rms:.3f} / {diff_rms:.3f}</div><div class="kpi-sub">52 Active Subcarriers</div></div>""", unsafe_allow_html=True)
                     
-                    # 4. Inject Live Charts
                     t_ax = np.arange(80) / 20.0
                     fig_w = go.Figure(go.Scatter(x=t_ax, y=top_sig, line=dict(color="#38bdf8", width=3)))
-                    fig_w.update_layout(title="Live Breathing Waveform (Top Sensitive Subcarriers)", height=320, template="plotly_dark", margin=dict(l=10, r=10, t=35, b=10))
+                    fig_w.update_layout(title="Live Breathing Waveform (Top Subcarriers)", height=320, template="plotly_dark", margin=dict(l=10, r=10, t=35, b=10))
                     ph_chart1.plotly_chart(fig_w, use_container_width=True)
                     
                     fig_h = go.Figure(go.Heatmap(z=(wc - np.mean(wc, axis=0)).T, colorscale="Viridis"))
-                    fig_h.update_layout(title="Live 52-Subcarrier Spatio-Temporal Heatmap", height=320, template="plotly_dark", margin=dict(l=10, r=10, t=35, b=10))
+                    fig_h.update_layout(title="Live Spatio-Temporal Heatmap", height=320, template="plotly_dark", margin=dict(l=10, r=10, t=35, b=10))
                     ph_chart2.plotly_chart(fig_h, use_container_width=True)
                     
         except Exception as e:
-            pass # Ignore serial packet tear errors during live stream
-
+            pass
 else:
-    st.info("💡 Switch to 'LIVE ESP32 HARDWARE STREAM' at the top to connect to your physical chips. (Showing static demo layout below)")
-    # (Your previous static demo layout remains safe and accessible here if you ever unplug the boards)
+    st.info("💡 Switch to 'LIVE ESP32 HARDWARE STREAM' at the top to connect to your physical chips.")
