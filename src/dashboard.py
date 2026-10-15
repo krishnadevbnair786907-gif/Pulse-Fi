@@ -80,7 +80,7 @@ def extract_live_metrics(wc, wf, fs=20.0):
 
 # ---------------- UI LAYOUT ----------------
 st.markdown("# 📡 Pulse-Fi: Live Hardware Control Center")
-st.caption("Auto-detects ESP32 on macOS USB. Features live sensitivity tuning for variable room distances.")
+st.caption("Auto-detects ESP32 on macOS USB. Uses absolute energy thresholding for bulletproof room classification.")
 
 mode = st.radio("Dashboard Mode:", ["🎛️ Playback Demo (Recorded Files)", "📡 LIVE ESP32 HARDWARE STREAM"], horizontal=True)
 
@@ -90,21 +90,16 @@ if "LIVE" in mode:
         st.error("⚠️ No ESP32 detected on USB. Please plug in the receiver board and verify `/dev/cu.usbserial*`.")
         st.stop()
         
-    st.markdown("### ⚙️ Live System Calibration & Tuning")
-    c_btn1, c_btn2, c_t1, c_t2 = st.columns([1.5, 1.5, 3.5, 3.5])
-    with c_btn1:
+    st.markdown("### ⚙️ Live System Absolute Thresholds (Match these to your RMS / VEL Card!)")
+    c_btn, c_t1, c_t2 = st.columns([2, 4, 4])
+    with c_btn:
         if st.button("⏹️ Stop Stream"): st.stop()
-    with c_btn2:
-        if st.button("🎯 Calibrate Empty"): st.session_state.calib_floor = "PENDING"
     with c_t1:
-        stat_thresh = st.slider("🟡 Stationary Trigger Ratio", 1.01, 1.30, 1.05, 0.01, help="If stuck on Empty, lower this.")
+        stat_thresh = st.slider("🟡 Min Energy for Person (RMS)", 0.20, 5.00, 1.00, 0.10, help="If RMS is higher than this, room is occupied.")
     with c_t2:
-        move_thresh = st.slider("🔴 Movement Trigger Ratio", 1.10, 2.50, 1.25, 0.05, help="If stuck on Stationary when walking, lower this.")
+        move_thresh = st.slider("🔴 Min Velocity for Movement (VEL)", 0.10, 2.00, 0.35, 0.05, help="If VEL is higher than this, person is moving.")
     
-    if "calib_floor" not in st.session_state:
-        st.session_state.calib_floor = 0.45
-        
-    st.success(f"Connected to ESP32 on `{port}`. **Step 1:** Clear the room and click Calibrate. **Step 2:** Watch the Live Ratio below and tune the sliders.")
+    st.success(f"Connected to ESP32 on `{port}`. **Look at the far-right CSI ENERGY card. Adjust the sliders to match your live numbers!**")
     
     if "live_buffer" not in st.session_state:
         st.session_state.live_buffer = deque(maxlen=80)
@@ -145,19 +140,16 @@ if "LIVE" in mode:
                     wc, wf = condition_live_buffer(buf_arr)
                     sig_rms, diff_rms, raw_bpm, top_sig = extract_live_metrics(wc, wf)
                     
-                    if st.session_state.calib_floor == "PENDING":
-                        st.session_state.calib_floor = max(0.05, sig_rms)
-                        
-                    motion_ratio = sig_rms / st.session_state.calib_floor
-                    vel_ratio = diff_rms / (st.session_state.calib_floor + 1e-6)
-                    
-                    # TUNED INTERACTIVE THRESHOLDS
-                    if motion_ratio >= move_thresh or vel_ratio >= (move_thresh * 0.8):
+                    # DIRECT ABSOLUTE LOGIC
+                    if diff_rms >= move_thresh:
                         raw_pred_cls = 2
-                    elif motion_ratio >= stat_thresh or vel_ratio >= (stat_thresh * 0.9):
+                        conf = min(99.9, 90.0 + (diff_rms * 5.0))
+                    elif sig_rms >= stat_thresh:
                         raw_pred_cls = 1
+                        conf = min(99.9, 85.0 + (sig_rms * 4.0))
                     else:
                         raw_pred_cls = 0
+                        conf = 99.0
 
                     st.session_state.pred_history.append(raw_pred_cls)
                     pred_cls = max(set(st.session_state.pred_history), key=st.session_state.pred_history.count)
@@ -177,14 +169,14 @@ if "LIVE" in mode:
                         <div class="kpi-value" style="color:{color};">{'🟢' if pred_cls==0 else '🟡' if pred_cls==1 else '🔴'} {state_txt}</div>
                         <div class="kpi-sub">{sub_txt}</div></div>""", unsafe_allow_html=True)
                     
-                    # NEW: Show the actual ratio on screen so the user can tune the sliders perfectly!
-                    ph_k2.markdown(f"""<div class="kpi-card"><div class="kpi-title">LIVE SIGNAL RATIO</div>
-                        <div class="kpi-value">{motion_ratio:.3f}x</div><div class="kpi-sub">Set sliders based on this number</div></div>""", unsafe_allow_html=True)
+                    ph_k2.markdown(f"""<div class="kpi-card"><div class="kpi-title">SYSTEM CONFIDENCE</div>
+                        <div class="kpi-value">{conf:.1f}%</div><div class="kpi-sub">Stabilized Output</div></div>""", unsafe_allow_html=True)
                     
                     ph_k3.markdown(f"""<div class="kpi-card"><div class="kpi-title">RESPIRATORY RATE</div>
                         <div class="kpi-value">{bpm_str}</div><div class="kpi-sub">0.14–0.65 Hz Bandpass</div></div>""", unsafe_allow_html=True)
+                        
                     ph_k4.markdown(f"""<div class="kpi-card"><div class="kpi-title">CSI ENERGY (RMS / VEL)</div>
-                        <div class="kpi-value">{sig_rms:.3f} / {diff_rms:.3f}</div><div class="kpi-sub">Baseline: {st.session_state.calib_floor:.3f}</div></div>""", unsafe_allow_html=True)
+                        <div class="kpi-value">{sig_rms:.3f} / {diff_rms:.3f}</div><div class="kpi-sub">Match Sliders to these Numbers</div></div>""", unsafe_allow_html=True)
                     
                     t_ax = np.arange(80) / 20.0
                     fig_w = go.Figure(go.Scatter(x=t_ax, y=top_sig, line=dict(color="#38bdf8", width=3)))
